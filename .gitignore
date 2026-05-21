@@ -1,0 +1,5 @@
+/.vscode
+/__pycache__
+/browser_data.db
+/memory_screenshots
+/web_cache

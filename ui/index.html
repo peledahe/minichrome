@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Minichrome UI</title>
+    <link rel="stylesheet" href="theme.css">
+    <link rel="stylesheet" href="style.css">
+    <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+<body>
+    <div id="nav-container">
+        <div class="tabs-container" id="tabs-bar">
+            <!-- Las pestañas se generarán dinámicamente -->
+        </div>
+        
+        <div class="toolbar">
+            <button class="btn" id="back-btn" title="Atrás">
+                <i data-lucide="chevron-left"></i>
+            </button>
+            <button class="btn" id="forward-btn" title="Adelante">
+                <i data-lucide="chevron-right"></i>
+            </button>
+            <button class="btn" id="refresh-btn" title="Recargar">
+                <i data-lucide="rotate-cw"></i>
+            </button>
+            
+            <div class="url-input-container">
+                <input type="text" id="url-input" placeholder="Busca o escribe una URL..." spellcheck="false">
+                <button class="btn btn-star" id="favorite-btn" title="Añadir a favoritos">
+                    <i data-lucide="star"></i>
+                </button>
+            </div>
+
+            <button class="btn" id="new-tab-btn" title="Nueva Pestaña">
+                <i data-lucide="plus"></i>
+            </button>
+            <button class="btn" id="settings-btn" title="Configuración">
+                <i data-lucide="settings"></i>
+            </button>
+        </div>
+        
+        <button class="btn-toggle" id="toggle-nav" title="Mostrar/Ocultar barra">
+            <i data-lucide="chevron-up"></i>
+        </button>
+    </div>
+
+    <script src="theme.js"></script>
+    <script src="script.js"></script>
+    <script>
+        lucide.createIcons();
+    </script>
+</body>
+</html>

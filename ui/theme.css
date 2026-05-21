@@ -1,0 +1,933 @@
+/* Control de color general por tema */
+:root {
+    color-scheme: dark;
+    --ui-surface: rgba(255, 255, 255, 0.06);
+    --ui-surface-strong: rgba(255, 255, 255, 0.1);
+    --ui-border: rgba(255, 255, 255, 0.12);
+    --ui-fg: #f3f4f6;
+    --ui-fg-muted: rgba(243, 244, 246, 0.68);
+    --ui-hover: rgba(124, 77, 255, 0.2);
+    --ui-active-bg: #6c5ce7;
+    --ui-active-fg: #ffffff;
+}
+
+:root[data-theme='light'] {
+    color-scheme: light;
+
+    /* style.css */
+    --bg-color: #f4f6fb;
+    --accent-color: #4f46e5;
+    --text-color: #1f2937;
+    --glass-bg: rgba(255, 255, 255, 0.84);
+    --glass-border: rgba(31, 41, 55, 0.12);
+
+    /* newtab/passwords/video-style */
+    --bg: #f4f6fb;
+    --bg-dark: #f4f6fb;
+    --sidebar-bg: #e8edf7;
+    --accent: #4f46e5;
+    --accent2: #6366f1;
+    --accent-glow: rgba(79, 70, 229, 0.28);
+    --text: #111827;
+    --text-primary: #111827;
+    --text-muted: rgba(17, 24, 39, 0.6);
+    --text-secondary: #4b5563;
+    --glass: rgba(255, 255, 255, 0.72);
+    --glass-border: rgba(31, 41, 55, 0.12);
+    --card-bg: #ffffff;
+    --danger: #dc2626;
+
+    --ui-surface: rgba(255, 255, 255, 0.82);
+    --ui-surface-strong: rgba(255, 255, 255, 0.94);
+    --ui-border: rgba(31, 41, 55, 0.14);
+    --ui-fg: #0f172a;
+    --ui-fg-muted: #475569;
+    --ui-hover: rgba(79, 70, 229, 0.12);
+    --ui-active-bg: #4f46e5;
+    --ui-active-fg: #ffffff;
+}
+
+/* Base compartida para mantener coherencia entre pantallas */
+:is(
+    .btn,
+    .btn-toggle,
+    .btn-win-action,
+    .btn-browser-action-slim,
+    .btn-icon-mini,
+    .add-subfolder-btn,
+    .delete-folder-btn,
+    .ag-nav-btn,
+    .ag-win-btn,
+    .ag-btn,
+    .ag-tab,
+    .pw-type-btn,
+    .pw-filter,
+    .nav-item,
+    .action-btn,
+    .field-action,
+    .engine-chip,
+    .search-btn,
+    .search-clear-btn,
+    .ql-btn,
+    .ql-add-btn,
+    .ql-paste-btn,
+    .ip-btn,
+    .ip-btn-icon,
+    .ip-fld-btn,
+    .ip-sidebar-head-btn,
+    .ip-nav-btn,
+    .arcade-nav button,
+    #back-btn,
+    #exit-btn
+) {
+    transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease, transform 0.15s ease;
+}
+
+:is(
+    .btn,
+    .btn-toggle,
+    .btn-win-action,
+    .btn-browser-action-slim,
+    .btn-icon-mini,
+    .add-subfolder-btn,
+    .delete-folder-btn,
+    .ag-nav-btn,
+    .ag-win-btn,
+    .ag-btn,
+    .ag-tab,
+    .pw-type-btn,
+    .pw-filter,
+    .nav-item,
+    .action-btn,
+    .field-action,
+    .engine-chip,
+    .search-btn,
+    .search-clear-btn,
+    .ql-btn,
+    .ql-add-btn,
+    .ql-paste-btn,
+    .ip-btn,
+    .ip-btn-icon,
+    .ip-fld-btn,
+    .ip-sidebar-head-btn,
+    .ip-nav-btn,
+    .arcade-nav button,
+    #back-btn,
+    #exit-btn
+):focus-visible {
+    outline: 2px solid var(--accent, #6c5ce7);
+    outline-offset: 2px;
+}
+
+:is(
+    .tab.active,
+    .ag-tab.active,
+    .engine-chip.active,
+    .nav-item.active,
+    .pw-filter.active,
+    .browser-tab.active,
+    .pw-type-btn.active
+) {
+    background: var(--ui-active-bg) !important;
+    color: var(--ui-active-fg) !important;
+    border-color: transparent !important;
+}
+
+/* Geometria compartida para que todos los controles se sientan del mismo sistema */
+:is(
+    .btn,
+    .btn-toggle,
+    .btn-win-action,
+    .btn-browser-action-slim,
+    .btn-icon-mini,
+    .ag-nav-btn,
+    .ag-win-btn,
+    .action-btn,
+    .field-action,
+    .search-btn,
+    .search-clear-btn,
+    .ql-add-btn,
+    .ql-paste-btn,
+    .ip-btn-icon,
+    .ip-sidebar-head-btn,
+    .ip-nav-btn,
+    .arcade-nav button,
+    #back-btn,
+    #exit-btn
+) {
+    min-width: 28px;
+    min-height: 28px;
+    border-radius: 9px;
+}
+
+:is(
+    .ag-btn,
+    .ql-btn,
+    .btn-primary,
+    .btn-secondary,
+    .btn-danger,
+    .ip-btn,
+    .pw-type-btn,
+    .nav-item
+) {
+    min-height: 31px;
+    border-radius: 9px;
+}
+
+:is(
+    .tab,
+    .ag-tab,
+    .engine-chip,
+    .pw-filter,
+    .browser-tab
+) {
+    min-height: 26px;
+    border-radius: 9px;
+}
+
+:is(
+    .btn,
+    .btn-toggle,
+    .btn-win-action,
+    .btn-browser-action-slim,
+    .btn-icon-mini,
+    .ag-nav-btn,
+    .ag-win-btn,
+    .action-btn,
+    .field-action,
+    .search-btn,
+    .search-clear-btn,
+    .ql-add-btn,
+    .ql-paste-btn,
+    .ip-btn-icon,
+    .ip-sidebar-head-btn,
+    .ip-nav-btn,
+    .arcade-nav button,
+    #back-btn,
+    #exit-btn
+) :is(svg, i) {
+    width: 13px;
+    height: 13px;
+}
+
+/* Etiquetas/chips más delgados y consistentes */
+:is(
+    .engine-chip,
+    .ag-badge,
+    .type-badge,
+    .player-tag-chip,
+    .ip-lb-counter,
+    .ip-lb-meta,
+    .ql-btn,
+    .pw-modal-label,
+    .field-label,
+    .shop-totals-col-label,
+    .payment-summary-title,
+    .ip-sidebar-head,
+    .folders-nav h2,
+    .cloud-nav h2,
+    .tags-nav h2
+) {
+    font-weight: 500 !important;
+    letter-spacing: 0.04em;
+}
+
+:is(
+    .engine-chip,
+    .ag-badge,
+    .type-badge,
+    .player-tag-chip,
+    .ip-lb-counter,
+    .ip-lb-meta,
+    .field-label,
+    .shop-totals-col-label,
+    .payment-summary-title
+) {
+    font-size: 0.72rem !important;
+}
+
+:root[data-theme='light'] :is(
+    .btn,
+    .btn-toggle,
+    .btn-win-action,
+    .btn-browser-action-slim,
+    .btn-icon-mini,
+    .add-subfolder-btn,
+    .delete-folder-btn,
+    .ag-nav-btn,
+    .ag-win-btn,
+    .ag-btn,
+    .ag-tab,
+    .pw-type-btn,
+    .pw-filter,
+    .nav-item,
+    .action-btn,
+    .field-action,
+    .engine-chip,
+    .search-btn,
+    .search-clear-btn,
+    .ql-btn,
+    .ql-add-btn,
+    .ql-paste-btn,
+    .ip-btn,
+    .ip-btn-icon,
+    .ip-fld-btn,
+    .ip-sidebar-head-btn,
+    .ip-nav-btn,
+    .arcade-nav button,
+    #back-btn,
+    #exit-btn
+) {
+    color: var(--ui-fg-muted) !important;
+    border-color: var(--ui-border) !important;
+    background: var(--ui-surface) !important;
+}
+
+:root[data-theme='light'] :is(
+    .btn,
+    .btn-toggle,
+    .btn-win-action,
+    .btn-browser-action-slim,
+    .btn-icon-mini,
+    .add-subfolder-btn,
+    .delete-folder-btn,
+    .ag-nav-btn,
+    .ag-win-btn,
+    .ag-btn,
+    .ag-tab,
+    .pw-type-btn,
+    .pw-filter,
+    .nav-item,
+    .action-btn,
+    .field-action,
+    .engine-chip,
+    .search-btn,
+    .search-clear-btn,
+    .ql-btn,
+    .ql-add-btn,
+    .ql-paste-btn,
+    .ip-btn,
+    .ip-btn-icon,
+    .ip-fld-btn,
+    .ip-sidebar-head-btn,
+    .ip-nav-btn,
+    .arcade-nav button,
+    #back-btn,
+    #exit-btn
+):hover {
+    color: var(--ui-fg) !important;
+    background: var(--ui-hover) !important;
+}
+
+:root[data-theme='light'] :is(
+    .btn,
+    .btn-toggle,
+    .btn-win-action,
+    .btn-browser-action-slim,
+    .btn-icon-mini,
+    .add-subfolder-btn,
+    .delete-folder-btn,
+    .ag-nav-btn,
+    .ag-win-btn,
+    .ag-btn,
+    .ag-tab,
+    .pw-type-btn,
+    .pw-filter,
+    .nav-item,
+    .action-btn,
+    .field-action,
+    .engine-chip,
+    .search-btn,
+    .search-clear-btn,
+    .ql-btn,
+    .ql-add-btn,
+    .ql-paste-btn,
+    .ip-btn,
+    .ip-btn-icon,
+    .ip-fld-btn,
+    .ip-sidebar-head-btn,
+    .ip-nav-btn,
+    .arcade-nav button,
+    #back-btn,
+    #exit-btn
+) :is(svg, i) {
+    color: inherit !important;
+    stroke: currentColor;
+}
+
+:root[data-theme='light'] :is(.btn-primary, .ag-btn-primary, .search-btn) {
+    color: #ffffff !important;
+    border-color: transparent !important;
+}
+
+:root[data-theme='light'] :is(.btn-secondary, .ag-btn-ghost, .ql-btn.ghost) {
+    color: #475569 !important;
+    background: var(--ui-surface-strong) !important;
+}
+
+:root[data-theme='light'] :is(.btn-primary, .btn-secondary, .btn-danger) {
+    min-height: 32px;
+    padding: 0.45rem 0.9rem;
+}
+
+/* Campos y textos con estilos inline en modo claro */
+:root[data-theme='light'] :is(
+    #cloud-playlist-name-input,
+    #cloud-url-input,
+    #new-tag-input,
+    #all-available-tags,
+    #current-video-tags,
+    #cloud-items-list,
+    #tags-video-title,
+    #cfg-folder-path,
+    #ip-media-path-label,
+    #ip-folder-tree,
+    #ip-move-dest-label
+) {
+    color: #334155 !important;
+}
+
+:root[data-theme='light'] :is(
+    #cloud-playlist-name-input,
+    #cloud-url-input,
+    #new-tag-input
+) {
+    background: #ffffff !important;
+    border-color: var(--ui-border) !important;
+}
+
+:root[data-theme='light'] :is(
+    .quick-link,
+    .ql-modal,
+    .search-box,
+    .app-card,
+    .password-card,
+    .field-value-wrap,
+    .modal,
+    .pw-modal-box,
+    .kb-modal-box,
+    .pm-modal-box,
+    .edit-modal-box,
+    .ip-modal,
+    .ip-lightbox,
+    .ip-thumb,
+    .arcade-nav,
+    .game-card
+) {
+    border-color: var(--ui-border) !important;
+}
+
+/* Correcciones de legibilidad en componentes con estilos inline heredados */
+:root[data-theme='light'] .search-box > svg {
+    fill: #64748b !important;
+}
+
+:root[data-theme='light'] :is(.logo-text .app-name strong, .arcade-title, .game-card h2) {
+    -webkit-text-fill-color: currentColor;
+}
+
+:root[data-theme='light'] :is(
+    #videoplayer-screen [style*='color:#fff'],
+    #imageplayer-screen [style*='color:#fff'],
+    #imageplayer-screen [style*='color:rgba(255,255,255']
+) {
+    color: #334155 !important;
+}
+
+:root[data-theme='light'] :is(
+    #videoplayer-screen [style*='background:rgba(255,255,255,0.05)'],
+    #imageplayer-screen [style*='background:rgba(255,255,255,0.05)']
+) {
+    background: #ffffff !important;
+    border-color: var(--ui-border) !important;
+}
+
+/* Boton global de cambio de tema */
+.mc-theme-toggle {
+    position: fixed;
+    right: 14px;
+    bottom: 14px;
+    z-index: 2147483647;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    border: 1px solid var(--glass-border, rgba(255, 255, 255, 0.25));
+    background: var(--glass, rgba(20, 20, 25, 0.72));
+    color: var(--text, #fff);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 15px;
+    line-height: 1;
+    transition: transform 0.15s ease, background 0.2s ease, color 0.2s ease;
+}
+
+.mc-theme-toggle:hover {
+    transform: scale(1.08);
+}
+
+/* Ajustes vista principal */
+:root[data-theme='light'] #url-input {
+    color: #111827;
+    background: rgba(255, 255, 255, 0.94);
+}
+
+:root[data-theme='light'] #url-input::placeholder {
+    color: rgba(17, 24, 39, 0.45);
+}
+
+:root[data-theme='light'] .tab.active,
+:root[data-theme='light'] .btn-toggle:hover {
+    color: #fff;
+}
+
+/* Agenda (estilos hardcoded) */
+:root[data-theme='light'] body {
+    background: #f4f6fb;
+    color: #1f2937;
+}
+
+:root[data-theme='light'] .ag-header,
+:root[data-theme='light'] .ag-tabs,
+:root[data-theme='light'] .ag-content,
+:root[data-theme='light'] .shop-totals,
+:root[data-theme='light'] .payment-summary,
+:root[data-theme='light'] .ag-item,
+:root[data-theme='light'] .ag-input,
+:root[data-theme='light'] .ag-view,
+:root[data-theme='light'] .pw-modal-box,
+:root[data-theme='light'] .kb-modal-box,
+:root[data-theme='light'] .pm-modal-box,
+:root[data-theme='light'] .edit-modal-box {
+    color: #1f2937;
+}
+
+:root[data-theme='light'] .ag-header,
+:root[data-theme='light'] .shop-totals,
+:root[data-theme='light'] .payment-summary,
+:root[data-theme='light'] .ag-item,
+:root[data-theme='light'] .ag-input,
+:root[data-theme='light'] .pw-modal-box,
+:root[data-theme='light'] .kb-modal-box,
+:root[data-theme='light'] .pm-modal-box,
+:root[data-theme='light'] .edit-modal-box {
+    background: #ffffff;
+    border-color: rgba(31, 41, 55, 0.14) !important;
+}
+
+:root[data-theme='light'] .ag-tab,
+:root[data-theme='light'] .section-header p,
+:root[data-theme='light'] .ag-empty,
+:root[data-theme='light'] .ag-badge,
+:root[data-theme='light'] .shop-total-item,
+:root[data-theme='light'] .payment-summary-label,
+:root[data-theme='light'] .payment-summary-title,
+:root[data-theme='light'] .ag-btn-ghost {
+    color: #4b5563 !important;
+}
+
+:root[data-theme='light'] .ag-tab.active,
+:root[data-theme='light'] .ag-btn-primary,
+:root[data-theme='light'] .ag-btn-income,
+:root[data-theme='light'] .pw-type-btn.active {
+    color: #fff !important;
+}
+
+:root[data-theme='light'] .ag-tabs {
+    background: linear-gradient(180deg, #d7dbe1 0%, #cfd4db 100%) !important;
+    border: 1px solid rgba(100, 116, 139, 0.28) !important;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.78);
+}
+
+:root[data-theme='light'] .ag-tab {
+    background: linear-gradient(180deg, #eceff3 0%, #e4e8ee 100%) !important;
+    border: 1px solid rgba(100, 116, 139, 0.26) !important;
+    color: #475569 !important;
+    font-size: 0.86rem;
+}
+
+:root[data-theme='light'] .ag-tab + .ag-tab {
+    margin-left: -1px;
+}
+
+:root[data-theme='light'] .ag-tab:hover {
+    background: linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%) !important;
+    border-color: rgba(71, 85, 105, 0.35) !important;
+    color: #334155 !important;
+}
+
+:root[data-theme='light'] .ag-tab.active {
+    background: linear-gradient(180deg, #ffffff 0%, #f8fafd 100%) !important;
+    border-color: rgba(71, 85, 105, 0.48) !important;
+    border-bottom-color: transparent !important;
+    color: #334155 !important;
+    box-shadow: 0 2px 8px rgba(15, 23, 42, 0.12) !important;
+    z-index: 2;
+}
+
+:root[data-theme='light'] .ag-tab.active::after {
+    background: #ffffff !important;
+    height: 4px;
+    bottom: -3px;
+}
+
+:root[data-theme='light'] .ag-input::placeholder {
+    color: #94a3b8;
+}
+
+:root[data-theme='light'] input[type='date'].ag-input,
+:root[data-theme='light'] #kb-card-due {
+    color-scheme: light !important;
+}
+
+/* Password manager */
+:root[data-theme='light'] .search-container input,
+:root[data-theme='light'] .field-value-wrap,
+:root[data-theme='light'] .password-card,
+:root[data-theme='light'] .modal {
+    background: #ffffff;
+    border-color: rgba(31, 41, 55, 0.14);
+}
+
+:root[data-theme='light'] .field-value,
+:root[data-theme='light'] .search-container input,
+:root[data-theme='light'] .site-info h3 {
+    color: #111827;
+}
+
+/* Image player */
+:root[data-theme='light'] #imageplayer-screen {
+    background: #eef2ff !important;
+    color: #1f2937 !important;
+}
+
+:root[data-theme='light'] .ip-header,
+:root[data-theme='light'] .ip-sidebar,
+:root[data-theme='light'] .ip-toolbar,
+:root[data-theme='light'] .ip-modal,
+:root[data-theme='light'] .ip-thumb,
+:root[data-theme='light'] .ip-btn,
+:root[data-theme='light'] .ip-header input[type='text'],
+:root[data-theme='light'] .ip-header select {
+    background: #ffffff !important;
+    color: #1f2937 !important;
+    border-color: rgba(31, 41, 55, 0.14) !important;
+}
+
+:root[data-theme='light'] .ip-header-title,
+:root[data-theme='light'] .ip-folder-item,
+:root[data-theme='light'] .ip-folder-path,
+:root[data-theme='light'] .ip-count {
+    color: #374151 !important;
+}
+
+:root[data-theme='light'] .ip-header select {
+    color-scheme: light;
+    background-image: none;
+}
+
+/* VideoPlayer: solo el fondo de reproduccion permanece oscuro */
+:root[data-theme='light'] .content {
+    background: linear-gradient(160deg, #f8fbff 0%, #eef3fb 100%) !important;
+}
+
+:root[data-theme='light'] .sidebar,
+:root[data-theme='light'] .playlist-sidebar,
+:root[data-theme='light'] .modal,
+:root[data-theme='light'] .browser-modal-content,
+:root[data-theme='light'] .header-left .btn-win-action,
+:root[data-theme='light'] .user-actions .btn-win-action,
+:root[data-theme='light'] #current-video-title {
+    background: #ffffff !important;
+    color: #1f2937 !important;
+    border-color: rgba(31, 41, 55, 0.14) !important;
+}
+
+:root[data-theme='light'] .video-wrapper,
+:root[data-theme='light'] .player-content,
+:root[data-theme='light'] #main-player,
+:root[data-theme='light'] #external-player {
+    background: #05070d !important;
+}
+
+:root[data-theme='light'] #current-folder-name,
+:root[data-theme='light'] .floating-title-container,
+:root[data-theme='light'] .folder-item,
+:root[data-theme='light'] .sort-select,
+:root[data-theme='light'] .video-title,
+:root[data-theme='light'] .video-date,
+:root[data-theme='light'] .video-duration {
+    color: #334155 !important;
+}
+
+/* ImagePlayer: fondo de imagen siempre oscuro; barras y botones claros */
+:root[data-theme='light'] #imageplayer-screen {
+    background: #0a0d13 !important;
+}
+
+:root[data-theme='light'] .ip-main,
+:root[data-theme='light'] .ip-gallery,
+:root[data-theme='light'] .ip-lb-stage,
+:root[data-theme='light'] .ip-lb-img-wrap,
+:root[data-theme='light'] .ip-lightbox {
+    background: #05070d !important;
+}
+
+:root[data-theme='light'] .ip-header,
+:root[data-theme='light'] .ip-toolbar,
+:root[data-theme='light'] .ip-sidebar,
+:root[data-theme='light'] .ip-lb-header,
+:root[data-theme='light'] .ip-lb-filmstrip,
+:root[data-theme='light'] .ip-modal {
+    background: #ffffff !important;
+    border-color: rgba(31, 41, 55, 0.14) !important;
+}
+
+:root[data-theme='light'] :is(
+    .ip-header-title,
+    .ip-folder-item,
+    .ip-folder-path,
+    .ip-count,
+    .ip-lb-title,
+    .ip-lb-meta,
+    .ip-lb-counter,
+    .ip-lb-zoom-pct,
+    .ip-modal h3,
+    .ip-modal p,
+    .ip-modal-label,
+    .ip-browse-item,
+    .ip-fld-btn,
+    .ip-sidebar-head,
+    .ip-nav-btn,
+    .ip-btn,
+    .ip-btn-icon
+) {
+    color: #334155 !important;
+}
+
+:root[data-theme='light'] .ip-lb-nav {
+    background: rgba(255, 255, 255, 0.9) !important;
+    border-color: rgba(31, 41, 55, 0.16) !important;
+    color: #334155 !important;
+}
+
+:root[data-theme='light'] .ip-lb-nav:hover {
+    background: rgba(79, 70, 229, 0.22) !important;
+    color: #1f2937 !important;
+}
+
+/* Agenda Kanban light: columnas y tarjetas más visibles */
+:root[data-theme='light'] #view-kanban .kb-board {
+    gap: 14px;
+}
+
+:root[data-theme='light'] #view-kanban .kb-col {
+    background: #f8fafc !important;
+    border: 1px solid rgba(148, 163, 184, 0.42) !important;
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.75);
+}
+
+:root[data-theme='light'] #view-kanban .kb-col-header {
+    background: #ffffff !important;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.35) !important;
+}
+
+:root[data-theme='light'] #view-kanban .kb-col-title {
+    color: #334155 !important;
+}
+
+:root[data-theme='light'] #view-kanban .kb-col-count {
+    background: #e2e8f0 !important;
+    color: #334155 !important;
+}
+
+:root[data-theme='light'] #view-kanban .kb-col-add {
+    color: #64748b !important;
+}
+
+:root[data-theme='light'] #view-kanban .kb-col-add:hover {
+    background: rgba(79, 70, 229, 0.14) !important;
+    color: #1e293b !important;
+}
+
+:root[data-theme='light'] #view-kanban .kb-cards {
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.58) 0%, rgba(248, 250, 252, 0.92) 100%);
+}
+
+:root[data-theme='light'] #view-kanban .kb-card {
+    background: #ffffff !important;
+    border: 1px solid rgba(148, 163, 184, 0.35) !important;
+    box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
+}
+
+:root[data-theme='light'] #view-kanban .kb-card:hover {
+    border-color: rgba(79, 70, 229, 0.45) !important;
+    box-shadow: 0 8px 20px rgba(79, 70, 229, 0.12) !important;
+}
+
+:root[data-theme='light'] #view-kanban .kb-card-title {
+    color: #0f172a !important;
+}
+
+:root[data-theme='light'] #view-kanban .kb-card-desc {
+    color: #64748b !important;
+}
+
+:root[data-theme='light'] #view-kanban .kb-card-btn {
+    color: #64748b !important;
+}
+
+:root[data-theme='light'] #view-kanban .kb-card-btn:hover {
+    background: rgba(79, 70, 229, 0.12) !important;
+    color: #1e293b !important;
+}
+
+:root[data-theme='light'] #view-kanban .kb-cards.drag-over {
+    background: rgba(79, 70, 229, 0.08) !important;
+}
+
+/* Agenda Notas: mantener pizarra y area completa en oscuro aun en light mode */
+:root[data-theme='light'] .ag-content:has(#view-notes.active),
+:root[data-theme='light'] #view-notes {
+    background: #090d17 !important;
+}
+
+:root[data-theme='light'] #view-notes .notes-toolbar {
+    background: transparent !important;
+}
+
+:root[data-theme='light'] #view-notes .notes-board {
+    background-color: #060912 !important;
+    border-color: rgba(148, 163, 184, 0.18) !important;
+}
+
+:root[data-theme='light'] #view-notes.active {
+    background: #090d17 !important;
+    border: 1px solid rgba(148, 163, 184, 0.18) !important;
+    border-radius: 12px;
+    padding: 14px;
+}
+
+:root[data-theme='light'] #view-notes.active .notes-toolbar {
+    background: #090d17 !important;
+}
+
+:root[data-theme='light'] #view-notes.active .notes-toolbar h2 {
+    color: #e5e7eb !important;
+}
+
+:root[data-theme='light'] #view-notes.active .notes-count-badge {
+    background: rgba(108, 92, 231, 0.32) !important;
+    color: #ddd6fe !important;
+    border-color: rgba(162, 155, 254, 0.45) !important;
+}
+
+:root[data-theme='light'] #view-notes.active .notes-hint,
+:root[data-theme='light'] #view-notes.active .notes-hint p {
+    color: rgba(226, 232, 240, 0.82) !important;
+}
+
+/* VideoPlayer light: contraste y controles del panel izquierdo */
+:root[data-theme='light'] .app-container > .sidebar {
+    background: #f8fbff !important;
+    border-right-color: rgba(31, 41, 55, 0.12) !important;
+}
+
+:root[data-theme='light'] :is(
+    .app-container .folders-nav h2,
+    .app-container .cloud-nav h2,
+    .app-container .tags-nav h2,
+    .app-container .modal-header h3,
+    .app-container .folder-item,
+    .app-container .cloud-playlist-item,
+    .app-container .cloud-playlist-item .playlist-name,
+    .app-container #current-folder-name,
+    .app-container #current-video-title,
+    .app-container .sort-select,
+    .app-container .modal h3,
+    .app-container .modal p,
+    .app-container .config-group label,
+    .app-container .config-group small,
+    .app-container .path-display
+) {
+    color: #334155 !important;
+}
+
+:root[data-theme='light'] .app-container .folder-item:hover,
+:root[data-theme='light'] .app-container .cloud-playlist-item:hover {
+    background: rgba(79, 70, 229, 0.1) !important;
+    color: #1f2937 !important;
+}
+
+:root[data-theme='light'] .app-container .btn-subtle,
+:root[data-theme='light'] .app-container .sort-select,
+:root[data-theme='light'] .app-container .btn-secondary,
+:root[data-theme='light'] .app-container .btn-browser-action-slim,
+:root[data-theme='light'] .app-container .btn-icon-mini {
+    background: #ffffff !important;
+    color: #475569 !important;
+    border: 1px solid rgba(31, 41, 55, 0.14) !important;
+}
+
+:root[data-theme='light'] .app-container .btn-subtle:hover,
+:root[data-theme='light'] .app-container .sort-select:hover,
+:root[data-theme='light'] .app-container .btn-secondary:hover,
+:root[data-theme='light'] .app-container .btn-browser-action-slim:hover,
+:root[data-theme='light'] .app-container .btn-icon-mini:hover {
+    background: rgba(79, 70, 229, 0.12) !important;
+    color: #0f172a !important;
+}
+
+/* Etiquetas del menu izquierdo (problema reportado: no se ven) */
+:root[data-theme='light'] .app-container #tags-list .tag-chip,
+:root[data-theme='light'] .app-container .tag-nav-item {
+    background: #eef2ff !important;
+    color: #1e293b !important;
+    border: 1px solid rgba(99, 102, 241, 0.28) !important;
+}
+
+:root[data-theme='light'] .app-container #tags-list .tag-chip:hover,
+:root[data-theme='light'] .app-container .tag-nav-item:hover {
+    background: rgba(79, 70, 229, 0.18) !important;
+    color: #0f172a !important;
+    border-color: rgba(79, 70, 229, 0.42) !important;
+}
+
+:root[data-theme='light'] .app-container #tags-list .tag-chip.active,
+:root[data-theme='light'] .app-container .tag-nav-item.active {
+    background: #4f46e5 !important;
+    color: #ffffff !important;
+    border-color: transparent !important;
+}
+
+:root[data-theme='light'] .app-container #tags-list .info-text {
+    color: #64748b !important;
+    opacity: 0.9 !important;
+}
+
+/* Modal de etiquetas en video */
+:root[data-theme='light'] .app-container #current-video-tags,
+:root[data-theme='light'] .app-container #all-available-tags {
+    background: #f8fafc !important;
+    border-color: rgba(31, 41, 55, 0.14) !important;
+}
+
+:root[data-theme='light'] .app-container #current-video-tags .tag-chip,
+:root[data-theme='light'] .app-container #all-available-tags .tag-chip {
+    background: #eef2ff !important;
+    color: #1e293b !important;
+    border-color: rgba(99, 102, 241, 0.28) !important;
+}
+
+:root[data-theme='light'] .app-container #current-video-tags .remove-tag {
+    background: rgba(148, 163, 184, 0.25) !important;
+    color: #475569 !important;
+}
+
+:root[data-theme='light'] .app-container #current-video-tags .remove-tag:hover {
+    background: rgba(239, 68, 68, 0.2) !important;
+    color: #b91c1c !important;
+}

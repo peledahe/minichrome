@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VideoPlayer</title>
+    <link rel="stylesheet" href="theme.css">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="video-style.css">
+    <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+</head>
+<body class="browser-active">
+    <!-- ═══════════════ VIDEO PLAYER ═══════════════ -->
+    <div class="app-container">
+        <aside class="sidebar">
+            <div class="logo">
+                <div style="display: flex; align-items: center; gap: 0.5rem; flex: 1;">
+                    <img src="favicon.png" alt="VideoPlayer" class="logo-img">
+                    <h1>VideoPlayer</h1>
+                </div>
+                <button id="settings-btn" class="btn-settings-top" title="Configuración">⚙️</button>
+            </div>
+            <div class="sidebar-content" style="flex: 1; overflow-y: auto;">
+                <nav class="folders-nav">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 0.5rem;">
+                        <h2 id="media-library-title">📁 Local</h2>
+                        <button class="btn-subtle" id="add-root-folder-btn" title="Nueva Carpeta en Raíz">+</button>
+                    </div>
+                    <ul id="folder-list">
+                        <!-- Folders will be injected here -->
+                    </ul>
+                </nav>
+
+                <!-- Nueva Sección Cloud -->
+                <nav class="cloud-nav" style="border-top: 1px solid var(--glass-border); padding-top: 1rem; margin-top: 1rem;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 0.5rem;">
+                        <h2>☁️ Listas Cloud</h2>
+                        <button class="btn-subtle" id="new-cloud-playlist" title="Nueva Lista">+</button>
+                    </div>
+                    <ul id="cloud-playlist-list"></ul>
+                </nav>
+
+                <!-- Sección de Etiquetas -->
+                <nav class="tags-nav" style="border-top: 1px solid var(--glass-border); padding-top: 1rem; margin-top: 1rem;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 0.5rem;">
+                        <h2>🏷️ Etiquetas</h2>
+                        <button class="btn-subtle" id="clear-all-tags-btn" title="Borrar todas las etiquetas" style="color:var(--danger); font-size:0.8rem;">🗑️</button>
+                    </div>
+                    <ul id="tags-list" style="list-style: none; padding-left: 0; display: flex; flex-wrap: wrap; gap: 6px;"></ul>
+                </nav>
+            </div>
+        </aside>
+
+        <main class="content">
+            <header class="top-bar">
+                <div class="header-left">
+                    <button class="btn-win-action" id="toggle-sidebar" title="Alternar Menú">
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/></svg>
+                    </button>
+                    <div class="current-path">
+                        <span id="current-folder-name">Selecciona una carpeta</span>
+                    </div>
+                </div>
+                <div class="floating-title-container">
+                    <h2 id="current-video-title">Ningún video seleccionado</h2>
+                    <div id="current-player-tags"></div>
+                </div>
+                <div class="user-actions">
+                    <button class="btn-win-action" id="open-browser-btn" title="Volver al Navegador">
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
+                    </button>
+                    <button class="btn-win-action" id="open-images-btn" title="Visor de Imágenes">
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>
+                    </button>
+                    <button class="btn-win-action" id="hide-btn" title="Mi Agenda de Trabajo">
+                        <div id="header-mini-calendar"></div>
+                    </button>
+                    <button class="btn-win-action" id="reset-player-btn" title="Limpiar Reproductor">
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M6 6h12v12H6z"/></svg>
+                    </button>
+                    <button class="btn-win-action" id="playlist-btn" title="Lista de Reproducción">
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M3 13h2v-2H3v2zm0 4h2v-2H3v2zm0-8h2V7H3v2zm4 4h14v-2H7v2zm0 4h14v-2H7v2zM7 7v2h14V7H7z"/></svg>
+                    </button>
+                    <button class="btn-win-action" id="toggle-ui" title="Modo Cine">
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg>
+                    </button>
+                </div>
+            </header>
+
+            <section class="player-section">
+                <div class="video-wrapper">
+                    <video id="main-player" class="player-content" controls autoplay>
+                        Tu navegador no soporta el formato de video.
+                    </video>
+                    <!-- Contenedor para embeds externos (YouTube/Web) -->
+                    <iframe id="external-player" class="player-content" style="display:none;" frameborder="0" allowfullscreen allow="autoplay; encrypted-media"></iframe>
+
+                    <!-- Acciones rápidas sobre el video activo -->
+                    <div id="video-quick-actions" class="video-quick-actions" style="display:none;">
+                        <button id="vqa-tag"    class="vqa-btn" title="Etiquetas">🏷️</button>
+                        <button id="vqa-delete" class="vqa-btn vqa-delete" title="Eliminar">🗑️</button>
+                    </div>
+
+                    <div id="player-loader" class="player-loader" style="display: none;">
+                        <div class="spinner-large"></div>
+                        <p style="margin-top: 15px; font-weight: 600; text-shadow: 0 2px 4px rgba(0,0,0,0.5);">Cargando video...</p>
+                    </div>
+
+                    <button id="prev-btn" class="nav-btn prev">
+                        <span class="nav-icon">❮</span>
+                    </button>
+                    <button id="next-btn" class="nav-btn next">
+                        <span class="nav-icon">❯</span>
+                    </button>
+
+                    <div class="video-info">
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Floating Playlist Sidebar -->
+    <div id="playlist-sidebar" class="playlist-sidebar">
+        <div class="sidebar-header">
+            <h3>Lista de reproducción <span id="playlist-count" style="font-size: 0.8rem; color: var(--text-secondary); margin-left: 8px; font-weight: normal; background: rgba(255,255,255,0.1); padding: 2px 8px; border-radius: 12px;">0</span></h3>
+            <div class="sort-controls">
+                        <select id="sort-select" class="sort-select">
+                            <option value="name-asc">Nombre (A-Z)</option>
+                            <option value="name-desc">Nombre (Z-A)</option>
+                            <option value="date-desc">Recientes 1ro</option>
+                            <option value="date-asc">Antiguos 1ro</option>
+                            <option value="size-desc">Pesados 1ro</option>
+                            <option value="size-asc">Ligeros 1ro</option>
+                        </select>
+            </div>
+        </div>
+        <div id="video-list" class="video-list-vertical">
+            <!-- Videos will be injected here -->
+        </div>
+    </div>
+
+    <!-- Privacy Screen (Híbrido) -->
+    <div id="privacy-screen" class="privacy-overlay">
+        <iframe id="privacy-frame" src="about:blank" frameborder="0" class="privacy-content" style="width: 100vw; height: 100vh; border: none;"></iframe>
+    </div>
+
+    <!-- Settings Modal -->
+    <div id="settings-modal" class="modal-overlay">
+        <div class="modal">
+            <div class="modal-header">
+                <h3>⚙️ Configuración del Sistema</h3>
+            </div>
+            <div class="modal-body">
+                <div class="config-group">
+                    <label>Página Inicial del Navegador:</label>
+                    <div class="input-with-button">
+                        <input type="text" id="config-home-url" placeholder="Ej: https://www.google.com">
+                        <button id="btn-paste-home-url" class="btn-icon-square" title="Pegar del portapapeles">📋</button>
+                    </div>
+                    <small>Dejar en blanco para usar Google por defecto.</small>
+                </div>
+                <div class="config-group">
+                    <label>Ruta de Carpeta de Videos:</label>
+                    <div class="input-with-button">
+                        <input type="text" id="config-media-path" placeholder="/home/usuario/Videos">
+                        <button id="btn-browse-local" class="btn-icon-square" title="Explorar carpetas">📂</button>
+                    </div>
+                    <small>Ruta absoluta en el servidor para buscar videos.</small>
+                </div>
+                <div class="config-group switch-group">
+                    <label for="config-start-muted">Silenciar audio al iniciar:</label>
+                    <input type="checkbox" id="config-start-muted">
+                    <small>Si se marca, los videos entrarán sin sonido.</small>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="save-settings" class="btn-primary">Guardar Cambios</button>
+                <button id="close-settings" class="btn-secondary">Cancelar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Local Browser Modal -->
+    <div id="browser-modal" class="modal-overlay">
+        <div class="modal browser-modal-content">
+            <div class="modal-header">
+                <h3>📂 Explorador de Carpetas</h3>
+            </div>
+            <div class="modal-body">
+                <div id="browser-current-path" class="path-display">/</div>
+                <div id="browser-list" class="folder-grid">
+                    <!-- Carpetas locales se inyectarán aquí -->
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="select-this-folder" class="btn-primary">Seleccionar esta carpeta</button>
+                <button id="close-browser" class="btn-secondary">Cancelar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Confirmation Modal -->
+    <div id="delete-modal" class="modal-overlay">
+        <div class="modal">
+            <h3>🗑️ Confirmar Borrado</h3>
+            <p>¿Realmente deseas eliminar este archivo de tu carpeta? No podrás recuperarlo.</p>
+            <div class="modal-footer">
+                <button id="cancel-delete" class="btn-secondary">Cancelar</button>
+                <button id="confirm-delete" class="btn-danger">Eliminar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Gestionar Lista Cloud -->
+    <div id="cloud-modal" class="modal-overlay">
+        <div class="modal" style="max-width: 700px; width: 90%; text-align: left; padding: 2rem;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.5rem;">
+                <h3 id="cloud-modal-title" style="font-size:1.2rem;">Gestionar Lista</h3>
+                <button id="close-cloud-modal" style="background:transparent;border:none;color:var(--text-secondary);font-size:1.5rem;cursor:pointer;line-height:1;">&times;</button>
+            </div>
+            <div class="modal-body" style="text-align:left;">
+                <div style="margin-bottom: 20px;">
+                    <label style="display:block; margin-bottom:8px; font-size:0.8rem; color:var(--text-secondary);">Nombre de la Lista</label>
+                    <input type="text" id="cloud-playlist-name-input" placeholder="Ej: Mis Favoritos..." style="width:100%; font-size:1rem; background:rgba(255,255,255,0.05); border:1px solid var(--glass-border); border-radius:8px; padding:0.75rem 1rem; color:#fff; outline:none;">
+                </div>
+                <div style="display:flex; gap:10px; margin-bottom:20px; border-top:1px solid rgba(255,255,255,0.1); padding-top:20px;">
+                    <input type="text" id="cloud-url-input" placeholder="Pegar URL de YouTube o sitio web..." style="flex:1; background:rgba(255,255,255,0.05); border:1px solid var(--glass-border); border-radius:8px; padding:0.75rem 1rem; color:#fff; outline:none;">
+                    <button class="btn-secondary" id="paste-cloud-url" title="Pegar desde el portapapeles" style="padding:0.75rem 1rem; border-radius:8px;">📋</button>
+                    <button class="btn-primary" id="add-to-cloud-btn" style="padding:0.75rem 1.5rem; border:none; border-radius:8px; cursor:pointer; white-space:nowrap;">Añadir</button>
+                </div>
+                <div id="cloud-items-list" class="sortable-list" style="max-height: 350px; overflow-y: auto; padding-right: 8px; margin-top: 10px;">
+                    <!-- Items de la lista cloud -->
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-secondary" id="cancel-cloud-modal">Cerrar</button>
+                <button class="btn-primary" id="save-cloud-modal">Guardar Cambios</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Gestionar Etiquetas -->
+    <div id="tags-modal" class="modal-overlay">
+        <div class="modal" style="max-width: 660px; width: 94%; text-align: left; padding: 2.2rem;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.5rem;">
+                <h3 style="font-size:1.2rem; color: var(--text-primary);">🏷️ Gestionar Etiquetas</h3>
+                <button id="close-tags-modal" style="background:transparent;border:none;color:var(--text-secondary);font-size:1.5rem;cursor:pointer;line-height:1;">&times;</button>
+            </div>
+            <div class="modal-body" style="text-align:left; gap: 14px;">
+                <p id="tags-video-title" style="margin-bottom: 15px; font-size: 0.9rem; color: var(--accent); font-weight: bold; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"></p>
+                <div style="display:flex; gap:10px; margin-bottom:20px;">
+                    <input type="text" id="new-tag-input" placeholder="Añadir nueva etiqueta..." style="flex:1; background:rgba(255,255,255,0.05); border:1px solid var(--glass-border); border-radius:8px; padding:0.75rem 1rem; color:#fff; outline:none;">
+                    <button class="btn-primary" id="add-tag-btn" style="padding:0.75rem 1.5rem; border:none; border-radius:8px; cursor:pointer; white-space:nowrap;">Añadir</button>
+                </div>
+                <p style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 10px;">Etiquetas del video:</p>
+                <div id="current-video-tags" style="display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; min-height: 46px; max-height: 165px; overflow-y: auto; padding: 12px; background: rgba(0,0,0,0.2); border-radius: 8px;">
+                    <!-- Etiquetas asignadas -->
+                </div>
+                <p style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 10px;">Todas tus etiquetas (click para añadir):</p>
+                <div id="all-available-tags" style="display: flex; flex-wrap: wrap; gap: 8px; padding: 12px; border: 1px solid var(--glass-border); border-radius: 8px; max-height: 190px; overflow-y: auto;">
+                    <!-- Todas las etiquetas -->
+                </div>
+            </div>
+            <div class="modal-footer" style="margin-top: 20px;">
+                <button class="btn-primary" id="done-tags-modal" style="width: 100%;">Listo</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="notification-container"></div>
+
+    <!-- Inicialización del puente y scripts -->
+    <script src="theme.js"></script>
+    <script>
+        document.addEventListener("DOMContentLoaded", () => {
+            if (typeof qt !== 'undefined') {
+                new QWebChannel(qt.webChannelTransport, function(channel) {
+                    window.py = channel.objects.py;
+                    // El JS principal se carga dinámicamente para asegurar que py ya existe
+                    const script = document.createElement('script');
+                    script.src = 'videoplayer.js';
+                    document.body.appendChild(script);
+                });
+            }
+        });
+    </script>
+</body>
+</html>

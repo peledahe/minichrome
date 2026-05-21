@@ -1,0 +1,993 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Visor de Imágenes</title>
+    <link rel="stylesheet" href="theme.css">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+</head>
+<body id="imageplayer-screen" style="display:flex; margin:0; position:fixed; top:0; left:0; width:100vw; height:100vh; z-index:4500; background:#0d0d12; flex-direction:column; font-family:'Outfit',sans-serif; color:#e0e0e8;">
+    <div id="toast-container" style="position: fixed; bottom: 20px; right: 20px; z-index: 9999; display: flex; flex-direction: column; gap: 10px;"></div>
+
+    <div class="ip-ctx-menu" id="ip-ctx-menu">
+        <button class="ip-ctx-item" id="ip-ctx-wallpaper">🖼️ Aplicar como fondo de pantalla</button>
+        <button class="ip-ctx-item" id="ip-ctx-rename">✏️ Renombrar imagen</button>
+        <button class="ip-ctx-item" id="ip-ctx-move">📂 Mover imagen</button>
+        <button class="ip-ctx-item" id="ip-ctx-delete">🗑️ Eliminar imagen</button>
+        <div class="ip-ctx-sep"></div>
+        <button class="ip-ctx-item" id="ip-ctx-close">✖ Cerrar menú</button>
+    </div>
+
+
+<style>
+/* ── Image Player ──────────────────────────────────────────────────────────── */
+#imageplayer-screen *{ box-sizing:border-box; }
+
+/* Header */
+.ip-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 0 120px 0 16px;
+    height: 50px;
+    background: rgba(10,10,18,0.95);
+    border-bottom: 1px solid rgba(255,255,255,0.07);
+    flex-shrink: 0;
+    position: relative;
+    -webkit-app-region: drag;
+}
+.ip-header > * { -webkit-app-region: no-drag; }
+/* Zona no-drag que cubre el área de los botones de ventana */
+.ip-win-nodrag {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 120px;
+    height: 100%;
+    -webkit-app-region: no-drag;
+    pointer-events: none;
+}
+.ip-header-title {
+    font-size: 0.92rem;
+    font-weight: 700;
+    color: rgba(255,255,255,0.9);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    white-space: nowrap;
+}
+.ip-header-sep { width:1px; height:20px; background:rgba(255,255,255,0.1); flex-shrink:0; }
+.ip-header-spacer { flex:1; }
+.ip-header input[type=text] {
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 8px;
+    color: #e0e0e8;
+    font-size: 0.82rem;
+    padding: 5px 12px;
+    outline: none;
+    width: 220px;
+    transition: border-color 0.2s;
+}
+.ip-header input[type=text]:focus { border-color: rgba(108,92,231,0.5); }
+.ip-header select {
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 8px;
+    color: #e0e0e8;
+    font-size: 0.82rem;
+    padding: 5px 28px 5px 10px;
+    outline: none;
+    cursor: pointer;
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='%23a0a0b0'%3E%3Cpath d='M7 10l5 5 5-5z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 8px center;
+    color-scheme: dark;
+    transition: border-color 0.15s, background-color 0.15s;
+}
+.ip-header select:hover {
+    background-color: rgba(255,255,255,0.1);
+    border-color: rgba(108,92,231,0.4);
+    color: #fff;
+}
+.ip-header select:focus {
+    border-color: rgba(108,92,231,0.55);
+}
+.ip-header select option {
+    background: #1c1c26;
+    color: #e0e0e8;
+    padding: 6px 10px;
+}
+.ip-btn {
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 8px;
+    color: rgba(255,255,255,0.7);
+    font-size: 0.82rem;
+    padding: 5px 12px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    transition: background 0.15s, color 0.15s;
+    white-space: nowrap;
+}
+.ip-btn:hover { background: rgba(255,255,255,0.11); color: #fff; }
+.ip-btn.accent { background: rgba(108,92,231,0.2); border-color: rgba(108,92,231,0.35); color: #a29bfe; }
+.ip-btn.accent:hover { background: rgba(108,92,231,0.3); }
+.ip-btn-icon {
+    background: transparent;
+    border: none;
+    color: rgba(255,255,255,0.5);
+    cursor: pointer;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 0;
+    transition: color 0.15s, background 0.15s;
+}
+.ip-btn-icon svg { display: block; }
+.ip-btn-icon:hover { color: #fff; background: rgba(255,255,255,0.08); }
+.ip-lb-delbtn:hover { color: #ff7675 !important; background: rgba(214,48,49,0.15) !important; }
+
+/* Body layout */
+.ip-body {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+}
+
+/* Sidebar */
+.ip-sidebar {
+    width: 230px;
+    flex-shrink: 0;
+    background: rgba(8,8,14,0.8);
+    border-right: 1px solid rgba(255,255,255,0.07);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+.ip-sidebar-head {
+    padding: 12px 14px 8px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: rgba(255,255,255,0.3);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-shrink: 0;
+}
+.ip-folder-tree {
+    flex: 1;
+    overflow-y: auto;
+    padding: 4px 0;
+}
+.ip-folder-tree::-webkit-scrollbar { width: 2px; }
+.ip-folder-tree::-webkit-scrollbar-thumb { background: rgba(108,92,231,0.3); }
+
+.ip-folder-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px 6px 12px;
+    cursor: pointer;
+    border-radius: 6px;
+    margin: 1px 6px;
+    font-size: 0.84rem;
+    color: rgba(255,255,255,0.65);
+    transition: background 0.12s, color 0.12s;
+    user-select: none;
+}
+.ip-folder-item:hover { background: rgba(255,255,255,0.05); color: #fff; }
+.ip-folder-item.active { background: rgba(108,92,231,0.18); color: #a29bfe; }
+.ip-folder-arrow {
+    width: 14px;
+    font-size: 0.65rem;
+    color: rgba(255,255,255,0.3);
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: transform 0.2s;
+}
+.ip-folder-arrow.open { transform: rotate(90deg); }
+.ip-folder-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ip-folder-children { padding-left: 14px; }
+
+.ip-sidebar-footer {
+    padding: 10px 12px;
+    border-top: 1px solid rgba(255,255,255,0.06);
+    flex-shrink: 0;
+}
+
+/* Main area */
+.ip-main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+.ip-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 16px;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+    flex-shrink: 0;
+    background: rgba(10,10,18,0.5);
+}
+.ip-folder-path {
+    font-size: 0.82rem;
+    color: rgba(255,255,255,0.4);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+}
+.ip-toolbar-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.ip-toolbar .ip-btn[disabled] {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+.ip-toolbar .ip-btn[disabled]:hover {
+    background: rgba(255,255,255,0.06);
+    color: rgba(255,255,255,0.7);
+}
+.ip-count { font-size: 0.78rem; color: rgba(255,255,255,0.3); white-space: nowrap; }
+
+/* Gallery */
+.ip-gallery {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    grid-auto-rows: 160px;
+    gap: 10px;
+    align-content: start;
+}
+.ip-gallery::-webkit-scrollbar { width: 4px; }
+.ip-gallery::-webkit-scrollbar-thumb { background: rgba(108,92,231,0.3); border-radius: 4px; }
+
+.ip-gallery-empty {
+    grid-column: 1/-1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 300px;
+    color: rgba(255,255,255,0.2);
+    font-size: 0.9rem;
+    gap: 12px;
+}
+.ip-gallery-empty .ep-icon { font-size: 3rem; }
+
+.ip-thumb {
+    position: relative;
+    border-radius: 8px;
+    overflow: hidden;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.07);
+    cursor: pointer;
+    transition: transform 0.15s, box-shadow 0.15s, border-color 0.15s;
+}
+.ip-thumb.selecting {
+    cursor: default;
+}
+.ip-thumb.selected {
+    border-color: rgba(108,92,231,0.75);
+    box-shadow: 0 0 0 2px rgba(108,92,231,0.3), 0 10px 28px rgba(0,0,0,0.35);
+}
+.ip-thumb:hover {
+    transform: scale(1.03);
+    box-shadow: 0 6px 24px rgba(0,0,0,0.5);
+    border-color: rgba(108,92,231,0.4);
+    z-index: 1;
+}
+.ip-thumb.selected:hover {
+    border-color: rgba(108,92,231,0.8);
+}
+.ip-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+    transition: opacity 0.3s;
+}
+.ip-thumb img[data-src] { opacity: 0; }
+.ip-thumb img.loaded { opacity: 1; }
+.ip-thumb-overlay {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 22px 6px 6px;
+    background: linear-gradient(transparent, rgba(0,0,0,0.82));
+    opacity: 0;
+    transition: opacity 0.2s;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+.ip-thumb:hover .ip-thumb-overlay { opacity: 1; }
+.ip-thumb.selected .ip-thumb-overlay,
+.ip-thumb.selecting .ip-thumb-overlay { opacity: 1; }
+.ip-thumb-name {
+    font-size: 0.7rem;
+    color: #fff;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    line-height: 1.3;
+    flex: 1;
+    min-width: 0;
+}
+.ip-thumb-act {
+    display: flex;
+    gap: 3px;
+    flex-shrink: 0;
+}
+.ip-thumb-select {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    width: 24px;
+    height: 24px;
+    border-radius: 999px;
+    border: 1px solid rgba(255,255,255,0.2);
+    background: rgba(0,0,0,0.45);
+    color: transparent;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.78rem;
+    font-weight: 700;
+    cursor: pointer;
+    z-index: 2;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.ip-thumb.selecting .ip-thumb-select {
+    display: flex;
+}
+.ip-thumb.selected .ip-thumb-select {
+    background: #6c5ce7;
+    border-color: rgba(108,92,231,0.9);
+    color: #fff;
+}
+.ip-thumb-select:hover {
+    border-color: rgba(255,255,255,0.45);
+}
+.ip-act-btn {
+    width: 24px;
+    height: 24px;
+    border-radius: 5px;
+    border: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255,255,255,0.15);
+    color: #fff;
+    transition: background 0.15s;
+    flex-shrink: 0;
+}
+.ip-act-btn:hover { background: rgba(108,92,231,0.7); }
+.ip-act-btn.del:hover { background: rgba(214,48,49,0.75); }
+
+/* Folder item action buttons */
+.ip-folder-actions {
+    display: none;
+    gap: 2px;
+    margin-left: auto;
+    flex-shrink: 0;
+}
+.ip-folder-item:hover .ip-folder-actions { display: flex; }
+.ip-fld-btn {
+    width: 20px;
+    height: 20px;
+    border-radius: 4px;
+    border: none;
+    cursor: pointer;
+    background: transparent;
+    color: rgba(255,255,255,0.45);
+    font-size: 11px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: color 0.15s, background 0.15s;
+    flex-shrink: 0;
+    padding: 0;
+}
+.ip-fld-btn:hover { color: #fff; background: rgba(255,255,255,0.12); }
+.ip-fld-btn.del:hover { color: #ff7675; background: rgba(214,48,49,0.2); }
+
+/* Sidebar "new root folder" button */
+.ip-sidebar-head-btn {
+    background: transparent;
+    border: none;
+    color: rgba(255,255,255,0.35);
+    cursor: pointer;
+    padding: 3px 5px;
+    border-radius: 5px;
+    font-size: 0.82rem;
+    font-weight: 700;
+    transition: color 0.15s, background 0.15s;
+    line-height: 1;
+}
+.ip-sidebar-head-btn:hover { color: #fff; background: rgba(255,255,255,0.1); }
+
+/* Lightbox */
+.ip-lightbox {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 9900;
+    background: rgba(0,0,0,0.96);
+    flex-direction: column;
+}
+.ip-lightbox.active { display: flex; }
+
+.ip-lb-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 120px 10px 16px;
+    background: rgba(10,10,18,0.95);
+    border-bottom: 1px solid rgba(255,255,255,0.07);
+    flex-shrink: 0;
+    z-index: 1;
+}
+.ip-lb-title {
+    font-size: 0.88rem;
+    color: rgba(255,255,255,0.8);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 50%;
+}
+.ip-lb-meta {
+    font-size: 0.75rem;
+    color: rgba(255,255,255,0.35);
+    margin-left: 12px;
+}
+.ip-lb-actions {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+}
+.ip-lb-counter {
+    font-size: 0.78rem;
+    color: rgba(255,255,255,0.4);
+    padding: 0 8px;
+    white-space: nowrap;
+}
+.ip-lb-zoom-pct {
+    font-size: 0.78rem;
+    color: rgba(255,255,255,0.5);
+    min-width: 36px;
+    text-align: center;
+    cursor: pointer;
+}
+
+.ip-zoom-sign {
+    font-size: 0.95rem;
+    font-weight: 700;
+    line-height: 1;
+}
+
+.ip-lb-stage {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.ip-lb-img-wrap {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+}
+#ip-lb-img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+    display: block;
+    transform-origin: center center;
+    transition: transform 0.15s ease;
+    cursor: grab;
+    user-select: none;
+    pointer-events: none;
+}
+#ip-lb-img.panning { cursor: grabbing; }
+
+.ip-lb-nav {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 48px;
+    height: 80px;
+    background: rgba(0,0,0,0.45);
+    backdrop-filter: blur(4px);
+    border: 1px solid rgba(255,255,255,0.1);
+    color: rgba(255,255,255,0.8);
+    font-size: 2rem;
+    cursor: pointer;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2;
+    transition: background 0.15s, color 0.15s, opacity 0.15s;
+    opacity: 0.5;
+}
+.ip-lb-nav:hover { background: rgba(108,92,231,0.3); color: #fff; opacity: 1; }
+.ip-lb-nav.prev { left: 12px; }
+.ip-lb-nav.next { right: 12px; }
+.ip-lb-nav:disabled { opacity: 0.15; cursor: default; }
+
+/* Filmstrip */
+.ip-lb-filmstrip {
+    height: 72px;
+    display: flex;
+    gap: 4px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 6px 10px;
+    background: rgba(6,6,12,0.9);
+    border-top: 1px solid rgba(255,255,255,0.07);
+    flex-shrink: 0;
+    scroll-behavior: smooth;
+}
+.ip-lb-filmstrip::-webkit-scrollbar { height: 2px; }
+.ip-lb-filmstrip::-webkit-scrollbar-thumb { background: rgba(108,92,231,0.4); }
+
+.ip-lb-thumb {
+    height: 58px;
+    width: 58px;
+    flex-shrink: 0;
+    border-radius: 5px;
+    overflow: hidden;
+    cursor: pointer;
+    border: 2px solid transparent;
+    transition: border-color 0.15s, transform 0.15s;
+    background: rgba(255,255,255,0.05);
+}
+.ip-lb-thumb img { width:100%; height:100%; object-fit:cover; display:block; }
+.ip-lb-thumb.active { border-color: #6c5ce7; transform: scale(1.08); }
+.ip-lb-thumb:hover:not(.active) { border-color: rgba(255,255,255,0.3); }
+
+/* Config modal */
+.ip-modal-bg {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.7);
+    z-index: 9950;
+    align-items: center;
+    justify-content: center;
+}
+.ip-modal-bg.active { display: flex; }
+.ip-modal {
+    position: relative;
+    background: #18181f;
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 16px;
+    padding: 28px 28px 24px;
+    width: 480px;
+    max-width: 92vw;
+    box-shadow: 0 24px 60px rgba(0,0,0,0.7);
+}
+.ip-modal-close {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    width: 32px;
+    height: 32px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 999px;
+    background: rgba(255,255,255,0.05);
+    color: rgba(255,255,255,0.72);
+    font-size: 1rem;
+    line-height: 1;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.ip-modal-close:hover {
+    background: rgba(255,255,255,0.12);
+    color: #fff;
+    border-color: rgba(255,255,255,0.18);
+}
+.ip-modal h3 { font-size: 1.05rem; font-weight: 700; margin: 0 0 6px; color: #fff; }
+.ip-modal p { font-size: 0.82rem; color: rgba(255,255,255,0.45); margin: 0 0 20px; }
+.ip-modal-label { font-size: 0.8rem; color: rgba(255,255,255,0.5); margin-bottom: 6px; display: block; }
+.ip-modal-input {
+    width: 100%;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 8px;
+    color: #e0e0e8;
+    font-size: 0.86rem;
+    padding: 9px 12px;
+    outline: none;
+    transition: border-color 0.2s;
+    margin-bottom: 8px;
+}
+.ip-modal-input:focus { border-color: rgba(108,92,231,0.5); }
+.ip-modal-browse {
+    max-height: 180px;
+    overflow-y: auto;
+    background: rgba(0,0,0,0.2);
+    border: 1px solid rgba(255,255,255,0.07);
+    border-radius: 8px;
+    margin-bottom: 16px;
+}
+.ip-modal-browse::-webkit-scrollbar { width: 3px; }
+.ip-modal-browse::-webkit-scrollbar-thumb { background: rgba(108,92,231,0.3); }
+.ip-browse-item {
+    padding: 7px 12px;
+    font-size: 0.82rem;
+    color: rgba(255,255,255,0.65);
+    cursor: pointer;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+    transition: background 0.12s;
+}
+.ip-browse-item:last-child { border-bottom: none; }
+.ip-browse-item:hover { background: rgba(108,92,231,0.15); color: #fff; }
+.ip-browse-item.parent { color: rgba(255,255,255,0.35); font-style: italic; }
+.ip-modal-row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px; }
+.ip-modal-btn {
+    padding: 8px 20px;
+    border-radius: 8px;
+    font-size: 0.86rem;
+    font-weight: 600;
+    cursor: pointer;
+    border: none;
+    transition: background 0.15s;
+}
+.ip-modal-btn.cancel { background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.6); }
+.ip-modal-btn.cancel:hover { background: rgba(255,255,255,0.13); }
+.ip-modal-btn.save { background: #6c5ce7; color: #fff; }
+.ip-modal-btn.save:hover { background: #7d6ff0; }
+
+/* Loading state */
+.ip-loading {
+    grid-column: 1/-1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 200px;
+    color: rgba(255,255,255,0.3);
+    font-size: 0.88rem;
+    gap: 10px;
+}
+@keyframes ip-spin { to { transform: rotate(360deg); } }
+.ip-spinner {
+    width: 20px;
+    height: 20px;
+    border: 2px solid rgba(255,255,255,0.1);
+    border-top-color: #6c5ce7;
+    border-radius: 50%;
+    animation: ip-spin 0.7s linear infinite;
+}
+
+/* Nav buttons group */
+.ip-nav-btns { display: flex; gap: 4px; align-items: center; }
+.ip-nav-btn {
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.09);
+    border-radius: 8px;
+    color: rgba(255,255,255,0.6);
+    padding: 0;
+    width: 30px;
+    height: 30px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+    -webkit-app-region: no-drag;
+}
+.ip-nav-btn:hover { background: rgba(255,255,255,0.11); color: #fff; border-color: rgba(255,255,255,0.18); }
+.ip-nav-btn.browser:hover  { background: rgba(0,184,148,0.15);  border-color: rgba(0,184,148,0.35);  color: #55efc4; }
+.ip-nav-btn.agenda:hover   { background: rgba(253,203,110,0.13); border-color: rgba(253,203,110,0.3);  color: #fdcb6e; }
+.ip-nav-btn.video:hover    { background: rgba(108,92,231,0.18);  border-color: rgba(108,92,231,0.38);  color: #a29bfe; }
+
+/* Context menu de imagen (reemplaza menu de pagina web) */
+.ip-ctx-menu {
+    position: fixed;
+    z-index: 12000;
+    min-width: 220px;
+    background: rgba(18, 18, 28, 0.96);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 10px;
+    padding: 6px;
+    box-shadow: 0 12px 30px rgba(0,0,0,0.45);
+    display: none;
+    backdrop-filter: blur(10px);
+}
+.ip-ctx-menu.active { display: block; }
+
+.ip-ctx-item {
+    width: 100%;
+    border: none;
+    background: transparent;
+    color: rgba(255,255,255,0.86);
+    text-align: left;
+    font-size: 0.82rem;
+    font-family: inherit;
+    border-radius: 7px;
+    padding: 8px 10px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    transition: background 0.15s, color 0.15s;
+}
+.ip-ctx-item:hover {
+    background: rgba(108,92,231,0.24);
+    color: #fff;
+}
+
+.ip-ctx-sep {
+    height: 1px;
+    margin: 6px 2px;
+    background: rgba(255,255,255,0.1);
+}
+</style>
+
+<!-- Header -->
+<div class="ip-header">
+    <div class="ip-nav-btns">
+        <button class="ip-nav-btn browser" id="ip-nav-browser" title="Ir al Navegador">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
+        </button>
+        <button class="ip-nav-btn agenda" id="ip-nav-agenda" title="Ir a la Agenda">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M20 3h-1V1h-2v2H7V1H5v2H4c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 18H4V8h16v13z"/></svg>
+        </button>
+        <button class="ip-nav-btn video" id="ip-nav-video" title="Ir a VideoPlayer">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M8 5v14l11-7zM4 5h2v14H4z"/></svg>
+        </button>
+
+    </div>
+    <div class="ip-header-sep"></div>
+    <div class="ip-header-title">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>
+        Visor de Imágenes
+    </div>
+    <div class="ip-header-spacer"></div>
+    <input type="text" id="ip-search" placeholder="🔍 Buscar imagen...">
+    <select id="ip-sort">
+        <option value="name-asc">Nombre A→Z</option>
+        <option value="name-desc">Nombre Z→A</option>
+        <option value="date-desc">Más reciente</option>
+        <option value="date-asc">Más antiguo</option>
+        <option value="size-desc">Mayor tamaño</option>
+    </select>
+    <div class="ip-win-nodrag"></div>
+</div>
+
+<!-- Body -->
+<div class="ip-body">
+
+    <!-- Sidebar -->
+    <div class="ip-sidebar">
+        <div class="ip-sidebar-head">
+            Carpetas
+            <div style="display:flex;gap:4px;align-items:center;">
+            <button class="ip-sidebar-head-btn" id="ip-new-root-folder-btn" title="Nueva carpeta en raíz">+</button>
+            <button class="ip-btn-icon" id="ip-cfg-btn" title="Configurar carpeta inicial">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M19.14 12.94c.04-.3.06-.61.06-.94s-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96a7.07 7.07 0 0 0-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.07.62-.07.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.37 1.04.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.57 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
+            </button>
+            </div>
+        </div>
+        <div class="ip-folder-tree" id="ip-folder-tree">
+            <div style="padding:20px 14px; font-size:0.8rem; color:rgba(255,255,255,0.2); text-align:center; line-height:1.6;">
+                Cargando carpetas...
+            </div>
+        </div>
+        <div class="ip-sidebar-footer">
+            <div id="ip-media-path-label" style="font-size:0.72rem; color:rgba(255,255,255,0.2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title=""></div>
+        </div>
+    </div>
+
+    <!-- Main gallery area -->
+    <div class="ip-main">
+        <div class="ip-toolbar">
+            <div class="ip-folder-path" id="ip-folder-path">Selecciona una carpeta</div>
+            <div class="ip-toolbar-actions">
+                <button class="ip-btn" id="ip-bulk-toggle">Seleccionar</button>
+                <button class="ip-btn" id="ip-bulk-select-all" disabled>Seleccionar todo</button>
+                <button class="ip-btn" id="ip-bulk-delete" disabled>Eliminar seleccionadas</button>
+            </div>
+            <div class="ip-count" id="ip-count"></div>
+        </div>
+        <div class="ip-gallery" id="ip-gallery">
+            <div class="ip-gallery-empty">
+                <div class="ep-icon">📂</div>
+                <div>Selecciona una carpeta del panel izquierdo</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Lightbox -->
+<div class="ip-lightbox" id="ip-lightbox">
+    <div class="ip-lb-header">
+        <div style="display:flex; align-items:center; gap:8px; min-width:0; flex:1;">
+            <div class="ip-lb-title" id="ip-lb-title"></div>
+            <div class="ip-lb-meta" id="ip-lb-meta"></div>
+        </div>
+        <div class="ip-lb-actions">
+            <span class="ip-lb-counter" id="ip-lb-counter"></span>
+            <div class="ip-header-sep"></div>
+            <button class="ip-btn-icon" id="ip-lb-rename" title="Renombrar imagen">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
+            </button>
+            <button class="ip-btn-icon" id="ip-lb-move" title="Mover a otra carpeta">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M20 6h-8l-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm0 12H4V6h5.17l2 2H20v10z"/></svg>
+            </button>
+            <button class="ip-btn-icon ip-lb-delbtn" id="ip-lb-delete" title="Eliminar imagen">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+            </button>
+            <div class="ip-header-sep"></div>
+            <button class="ip-btn-icon" id="ip-lb-zoom-out" title="Alejar (-)">
+                <span class="ip-zoom-sign" aria-hidden="true">-</span>
+            </button>
+            <span class="ip-lb-zoom-pct" id="ip-lb-zoom-pct" title="Clic para ajustar">100%</span>
+            <button class="ip-btn-icon" id="ip-lb-zoom-in" title="Acercar (+)">
+                <span class="ip-zoom-sign" aria-hidden="true">+</span>
+            </button>
+            <button class="ip-btn-icon" id="ip-lb-fit" title="Ajustar a pantalla">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M3 3h7v2H5v5H3V3zm11 0h7v7h-2V5h-5V3zm7 11v7h-7v-2h5v-5h2zM3 14h2v5h5v2H3v-7z"/></svg>
+            </button>
+            <div class="ip-header-sep"></div>
+            <button class="ip-btn-icon" id="ip-lb-admin" title="Admin de imagen y ruta">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M12 2a10 10 0 1 0 10 10A10.01 10.01 0 0 0 12 2zm1 15h-2v-6h2zm0-8h-2V7h2z"/></svg>
+            </button>
+            <button class="ip-btn-icon" id="ip-lb-close" title="Cerrar (ESC)">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+            </button>
+        </div>
+    </div>
+    <div class="ip-lb-stage" id="ip-lb-stage">
+        <button class="ip-lb-nav prev" id="ip-lb-prev">‹</button>
+        <div class="ip-lb-img-wrap" id="ip-lb-img-wrap">
+            <img id="ip-lb-img" alt="" draggable="false">
+        </div>
+        <button class="ip-lb-nav next" id="ip-lb-next">›</button>
+    </div>
+    <div class="ip-lb-filmstrip" id="ip-lb-filmstrip"></div>
+</div>
+
+<!-- Config modal -->
+<div class="ip-modal-bg" id="ip-cfg-modal">
+    <div class="ip-modal">
+        <button class="ip-modal-close" data-close-modal="ip-cfg-modal" aria-label="Cerrar">×</button>
+        <h3>📁 Carpeta de Imágenes</h3>
+        <p>Selecciona la carpeta raíz donde se encuentran tus imágenes</p>
+        <label class="ip-modal-label">Ruta de la carpeta</label>
+        <input type="text" class="ip-modal-input" id="ip-cfg-path-input" placeholder="/ruta/a/mis/imágenes">
+        <div class="ip-modal-browse" id="ip-cfg-browse"></div>
+        <div class="ip-modal-row">
+            <button class="ip-modal-btn cancel" id="ip-cfg-cancel">Cancelar</button>
+            <button class="ip-modal-btn save" id="ip-cfg-save">Guardar</button>
+        </div>
+    </div>
+</div>
+
+<!-- Rename image modal -->
+<div class="ip-modal-bg" id="ip-rename-modal">
+    <div class="ip-modal">
+        <button class="ip-modal-close" data-close-modal="ip-rename-modal" aria-label="Cerrar">×</button>
+        <h3>✏️ Renombrar imagen</h3>
+        <p>Escribe el nuevo nombre del archivo</p>
+        <label class="ip-modal-label">Nombre</label>
+        <input type="text" class="ip-modal-input" id="ip-rename-input" placeholder="nuevo-nombre.jpg">
+        <div class="ip-modal-row">
+            <button class="ip-modal-btn cancel" id="ip-rename-cancel">Cancelar</button>
+            <button class="ip-modal-btn save" id="ip-rename-save">Renombrar</button>
+        </div>
+    </div>
+</div>
+
+<!-- Move image modal -->
+<div class="ip-modal-bg" id="ip-move-modal">
+    <div class="ip-modal">
+        <button class="ip-modal-close" data-close-modal="ip-move-modal" aria-label="Cerrar">×</button>
+        <h3>📂 Mover imagen</h3>
+        <p>Selecciona la carpeta de destino</p>
+        <div class="ip-modal-browse" id="ip-move-tree" style="max-height:260px;"></div>
+        <div style="font-size:0.78rem; color:rgba(255,255,255,0.35); margin:6px 0 12px;">
+            Destino: <span id="ip-move-dest-label" style="color:#a29bfe;">—</span>
+        </div>
+        <div class="ip-modal-row">
+            <button class="ip-modal-btn cancel" id="ip-move-cancel">Cancelar</button>
+            <button class="ip-modal-btn save" id="ip-move-save">Mover aquí</button>
+        </div>
+    </div>
+</div>
+
+<!-- Folder name modal (create / rename) -->
+<div class="ip-modal-bg" id="ip-folder-modal">
+    <div class="ip-modal">
+        <button class="ip-modal-close" data-close-modal="ip-folder-modal" aria-label="Cerrar">×</button>
+        <h3 id="ip-folder-modal-title">📁 Nueva carpeta</h3>
+        <p id="ip-folder-modal-desc">Escribe el nombre de la carpeta</p>
+        <label class="ip-modal-label">Nombre</label>
+        <input type="text" class="ip-modal-input" id="ip-folder-name-input" placeholder="nombre-carpeta">
+        <div class="ip-modal-row">
+            <button class="ip-modal-btn cancel" id="ip-folder-modal-cancel">Cancelar</button>
+            <button class="ip-modal-btn save" id="ip-folder-modal-save">Crear</button>
+        </div>
+    </div>
+</div>
+
+<!-- Confirm delete modal -->
+<div class="ip-modal-bg" id="ip-confirm-modal">
+    <div class="ip-modal">
+        <button class="ip-modal-close" data-close-modal="ip-confirm-modal" aria-label="Cerrar">×</button>
+        <h3 id="ip-confirm-title">¿Eliminar?</h3>
+        <p id="ip-confirm-desc"></p>
+        <div class="ip-modal-row">
+            <button class="ip-modal-btn cancel" id="ip-confirm-cancel">Cancelar</button>
+            <button class="ip-modal-btn save" id="ip-confirm-ok" style="background:#d63031;">Eliminar</button>
+        </div>
+    </div>
+</div>
+
+<!-- Admin image modal -->
+<div class="ip-modal-bg" id="ip-admin-modal">
+    <div class="ip-modal">
+        <button class="ip-modal-close" data-close-modal="ip-admin-modal" aria-label="Cerrar">×</button>
+        <h3>🛠️ Admin de Imagen</h3>
+        <p>Gestiona la imagen seleccionada y su ruta</p>
+
+        <label class="ip-modal-label">Nombre</label>
+        <input type="text" class="ip-modal-input" id="ip-admin-name" readonly>
+
+        <label class="ip-modal-label">Ruta relativa</label>
+        <input type="text" class="ip-modal-input" id="ip-admin-relpath" readonly>
+
+        <label class="ip-modal-label">Ruta absoluta</label>
+        <input type="text" class="ip-modal-input" id="ip-admin-abspath" readonly>
+
+        <div class="ip-modal-row" style="justify-content:flex-start; margin-bottom:8px;">
+            <button class="ip-modal-btn cancel" id="ip-admin-copy-path">Copiar ruta</button>
+        </div>
+
+        <div class="ip-modal-row" style="justify-content:space-between;">
+            <div style="display:flex; gap:8px;">
+                <button class="ip-modal-btn cancel" id="ip-admin-rename">Renombrar</button>
+                <button class="ip-modal-btn cancel" id="ip-admin-move">Mover</button>
+                <button class="ip-modal-btn save" id="ip-admin-delete" style="background:#d63031;">Eliminar</button>
+            </div>
+            <button class="ip-modal-btn save" id="ip-admin-close">Cerrar</button>
+        </div>
+    </div>
+</div>
+
+    <script src="theme.js"></script>
+    <script src="imageplayer.js"></script>
+</body>
+</html>

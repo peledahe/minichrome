@@ -1,0 +1,653 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Editor de Capturas</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0b1020;
+      --panel: #121a31;
+      --panel-border: rgba(255, 255, 255, 0.14);
+      --text: #e7eefc;
+      --muted: #9eb0d8;
+      --accent: #3b82f6;
+      --accent-2: #2563eb;
+      --danger: #ef4444;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: radial-gradient(circle at 0 0, #121d3a 0%, var(--bg) 58%);
+      color: var(--text);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 12px;
+      background: rgba(8, 14, 30, 0.95);
+      border-bottom: 1px solid var(--panel-border);
+      flex-wrap: wrap;
+    }
+
+    .group {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding-right: 10px;
+      margin-right: 2px;
+      border-right: 1px solid rgba(255, 255, 255, 0.12);
+    }
+
+    .group:last-child {
+      border-right: none;
+      margin-right: 0;
+      padding-right: 0;
+    }
+
+    .icon-btn,
+    .btn {
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      background: rgba(255, 255, 255, 0.04);
+      color: var(--text);
+      border-radius: 8px;
+      cursor: pointer;
+      min-height: 32px;
+      transition: background 0.15s, border-color 0.15s, color 0.15s;
+    }
+
+    .icon-btn {
+      width: 34px;
+      height: 34px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+      position: relative;
+    }
+
+    .icon-btn svg {
+      width: 16px;
+      height: 16px;
+      fill: currentColor;
+      pointer-events: none;
+    }
+
+    .tool-chip {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      line-height: 1;
+      pointer-events: none;
+      color: currentColor;
+    }
+
+    .num-badge {
+      position: absolute;
+      right: -4px;
+      top: -5px;
+      min-width: 14px;
+      height: 14px;
+      border-radius: 7px;
+      background: #0b1222;
+      border: 1px solid rgba(255, 255, 255, 0.35);
+      color: #fff;
+      font-size: 9px;
+      font-weight: 700;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0 3px;
+      pointer-events: none;
+    }
+
+    .icon-btn:hover,
+    .btn:hover {
+      background: rgba(255, 255, 255, 0.1);
+    }
+
+    .icon-btn.active {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+
+    .icon-btn.primary,
+    .btn.primary {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+      font-weight: 600;
+    }
+
+    .icon-btn.primary:hover,
+    .btn.primary:hover {
+      background: var(--accent-2);
+      border-color: var(--accent-2);
+    }
+
+    .icon-btn.danger:hover,
+    .btn.danger:hover {
+      border-color: var(--danger);
+      color: #ffd4d4;
+    }
+
+    .slider-wrap {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    #color {
+      width: 34px;
+      height: 34px;
+      border-radius: 8px;
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      background: rgba(255, 255, 255, 0.04);
+      padding: 3px;
+      cursor: pointer;
+      appearance: none;
+      -webkit-appearance: none;
+      overflow: hidden;
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+    }
+
+    #color:hover {
+      background: rgba(255, 255, 255, 0.1);
+      border-color: rgba(255, 255, 255, 0.28);
+    }
+
+    #color::-webkit-color-swatch-wrapper {
+      padding: 0;
+    }
+
+    #color::-webkit-color-swatch {
+      border: none;
+      border-radius: 5px;
+    }
+
+    #color::-moz-color-swatch {
+      border: none;
+      border-radius: 5px;
+    }
+
+    #width {
+      width: 88px;
+    }
+
+    .canvas-wrap {
+      flex: 1;
+      overflow: auto;
+      padding: 14px;
+      background:
+        linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px) 0 0/22px 22px,
+        linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px) 0 0/22px 22px;
+    }
+
+    #canvas {
+      display: block;
+      background: #fff;
+      border-radius: 10px;
+      box-shadow: 0 14px 36px rgba(0, 0, 0, 0.45);
+      cursor: crosshair;
+      max-width: none;
+    }
+
+    .status {
+      padding: 8px 12px;
+      color: var(--muted);
+      font-size: 12px;
+      border-top: 1px solid var(--panel-border);
+      background: rgba(8, 14, 30, 0.94);
+      min-height: 34px;
+    }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="group">
+      <button id="tool-select" class="icon-btn" title="Seleccionar area" aria-label="Seleccionar area"><svg viewBox="0 0 24 24"><path d="M3 3h7v2H5v5H3zm11 0h7v7h-2V5h-5zM3 14h2v5h5v2H3zm16 0h2v7h-7v-2h5zM8 8h8v8H8z"/></svg></button>
+      <button id="tool-rect" class="icon-btn active" title="Cuadro" aria-label="Cuadro"><svg viewBox="0 0 24 24"><path d="M4 4h16v16H4z"/></svg></button>
+      <button id="tool-arrow" class="icon-btn" title="Flecha" aria-label="Flecha"><svg viewBox="0 0 24 24"><path d="M4 20l16-16v6h2V2h-8v2h6L4 18z"/></svg></button>
+      <button id="tool-text" class="icon-btn" title="Texto" aria-label="Texto"><svg viewBox="0 0 24 24"><path d="M4 4h16v3h-6v13h-4V7H4z"/></svg></button>
+      <button id="tool-highlight" class="icon-btn" title="Resaltar" aria-label="Resaltar"><svg viewBox="0 0 24 24"><path d="M3 17h18v4H3zm2.2-2.8l8.9-8.9 3.6 3.6-8.9 8.9H5.2z"/></svg></button>
+      <button id="tool-blur" class="icon-btn" title="Blur / ocultar datos" aria-label="Blur"><svg viewBox="0 0 24 24"><path d="M5 5h14v14H5z" opacity=".22"/><path d="M7 7h3v3H7zm4 0h2v2h-2zm3 0h3v3h-3zM7 11h2v2H7zm3 0h3v3h-3zm4 0h2v2h-2zM7 14h3v3H7zm4 0h2v2h-2zm3 0h3v3h-3z"/></svg></button>
+      <button id="tool-number" class="icon-btn" title="Numerar pasos" aria-label="Numerar"><svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm-1 5h2v10h-2zM9 9h2v2H9zm4 4h2v2h-2z"/></svg><span id="num-badge" class="num-badge">1</span></button>
+    </div>
+
+    <div class="group">
+      <input id="color" type="color" value="#ff2d55" title="Color de trazo" aria-label="Color de trazo">
+      <div class="slider-wrap" title="Grosor" aria-label="Grosor">
+        <input id="width" type="range" min="1" max="12" value="3">
+      </div>
+    </div>
+
+    <div class="group">
+      <button id="undo" class="icon-btn" title="Deshacer" aria-label="Deshacer"><svg viewBox="0 0 24 24"><path d="M12 5V2L7 7l5 5V9c3.3 0 6 2.7 6 6 0 .7-.1 1.4-.4 2h2.1c.2-.6.3-1.3.3-2 0-4.4-3.6-8-8-8z"/></svg></button>
+      <button id="clear" class="icon-btn danger" title="Limpiar anotaciones" aria-label="Limpiar"><svg viewBox="0 0 24 24"><path d="M6 7h12l-1 14H7L6 7zm3-4h6l1 2h4v2H4V5h4z"/></svg></button>
+      <button id="clear-selection" class="icon-btn" title="Quitar seleccion" aria-label="Quitar seleccion"><svg viewBox="0 0 24 24"><path d="M3 3h7v2H5v5H3zm11 0h7v7h-2V5h-5zM3 14h2v5h5v2H3zm16 0h2v7h-7v-2h5zM8 8l8 8m0-8-8 8"/></svg></button>
+      <button id="copy" class="icon-btn" title="Copiar al portapapeles" aria-label="Copiar"><svg viewBox="0 0 24 24"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg></button>
+      <button id="save" class="icon-btn primary" title="Guardar (si hay seleccion guarda solo esa area)" aria-label="Guardar"><svg viewBox="0 0 24 24"><path d="M17 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7l-4-4zM8 5h7v4H8zm4 13-4-4h2.5V10h3v4H16z"/></svg></button>
+      <button id="cancel" class="icon-btn danger" title="Cancelar y cerrar sin guardar" aria-label="Cancelar"><svg viewBox="0 0 24 24"><path d="M18.3 5.71 12 12l6.3 6.29-1.41 1.41L10.59 13.41 4.29 19.7 2.88 18.29 9.17 12 2.88 5.71 4.29 4.3l6.3 6.29 6.29-6.3z"/></svg></button>
+    </div>
+  </div>
+
+  <div class="canvas-wrap">
+    <canvas id="canvas"></canvas>
+  </div>
+
+  <div id="status" class="status">Listo para anotar. Usa el icono de seleccion para exportar solo un area.</div>
+
+  <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+  <script>
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const statusEl = document.getElementById('status');
+
+    let py = null;
+    if (window.qt && window.qt.webChannelTransport) {
+      new QWebChannel(window.qt.webChannelTransport, (channel) => {
+        py = channel.objects.py || null;
+      });
+    }
+
+    const state = {
+      tool: 'rect',
+      color: '#ff2d55',
+      width: 3,
+      shapes: [],
+      draft: null,
+      drawing: false,
+      baseImage: null,
+      step: 1,
+      selection: null,
+      originalPath: '',
+    };
+
+    function setStatus(text) {
+      statusEl.textContent = text;
+    }
+
+    function updateNumberBadge() {
+      const badge = document.getElementById('num-badge');
+      if (badge) badge.textContent = String(state.step);
+    }
+
+    function normRect(a) {
+      const x = Math.min(a.x1, a.x2);
+      const y = Math.min(a.y1, a.y2);
+      const w = Math.abs(a.x2 - a.x1);
+      const h = Math.abs(a.y2 - a.y1);
+      return { x, y, w, h };
+    }
+
+    function setTool(tool) {
+      state.tool = tool;
+      document.querySelectorAll('.icon-btn').forEach((b) => {
+        if (b.id.startsWith('tool-')) b.classList.remove('active');
+      });
+      const active = document.getElementById(`tool-${tool}`);
+      if (active) active.classList.add('active');
+      setStatus(`Herramienta activa: ${tool}`);
+    }
+
+    function getPos(e) {
+      const r = canvas.getBoundingClientRect();
+      return { x: e.clientX - r.left, y: e.clientY - r.top };
+    }
+
+    function drawArrow(shape) {
+      const head = Math.max(8, shape.w * 3);
+      const dx = shape.x2 - shape.x1;
+      const dy = shape.y2 - shape.y1;
+      const ang = Math.atan2(dy, dx);
+
+      ctx.beginPath();
+      ctx.moveTo(shape.x1, shape.y1);
+      ctx.lineTo(shape.x2, shape.y2);
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.moveTo(shape.x2, shape.y2);
+      ctx.lineTo(shape.x2 - head * Math.cos(ang - Math.PI / 6), shape.y2 - head * Math.sin(ang - Math.PI / 6));
+      ctx.lineTo(shape.x2 - head * Math.cos(ang + Math.PI / 6), shape.y2 - head * Math.sin(ang + Math.PI / 6));
+      ctx.closePath();
+      ctx.fillStyle = shape.color;
+      ctx.fill();
+    }
+
+    function drawShape(shape) {
+      ctx.strokeStyle = shape.color;
+      ctx.fillStyle = shape.color;
+      ctx.lineWidth = shape.w;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+
+      if (shape.type === 'rect') {
+        const r = normRect(shape);
+        ctx.strokeRect(r.x, r.y, r.w, r.h);
+      } else if (shape.type === 'highlight') {
+        const r = normRect(shape);
+        ctx.save();
+        ctx.globalAlpha = 0.26;
+        ctx.fillRect(r.x, r.y, r.w, r.h);
+        ctx.restore();
+        ctx.strokeRect(r.x, r.y, r.w, r.h);
+      } else if (shape.type === 'blur') {
+        const r = normRect(shape);
+        if (r.w > 2 && r.h > 2) {
+          const blurPx = Math.max(5, Math.min(28, shape.w * 2.4));
+
+          const src = document.createElement('canvas');
+          src.width = Math.max(1, Math.floor(r.w));
+          src.height = Math.max(1, Math.floor(r.h));
+          const sctx = src.getContext('2d');
+          sctx.drawImage(canvas, r.x, r.y, r.w, r.h, 0, 0, src.width, src.height);
+
+          const dst = document.createElement('canvas');
+          dst.width = src.width;
+          dst.height = src.height;
+          const dctx = dst.getContext('2d');
+
+          // Blur real si el motor soporta filtros; fallback a pixelado si no.
+          if ('filter' in dctx) {
+            dctx.filter = `blur(${blurPx}px)`;
+            dctx.drawImage(src, 0, 0);
+            dctx.filter = 'none';
+          } else {
+            const amount = Math.max(5, Math.min(48, shape.w * 5));
+            const sw = Math.max(1, Math.floor(src.width / amount));
+            const sh = Math.max(1, Math.floor(src.height / amount));
+            const tiny = document.createElement('canvas');
+            tiny.width = sw;
+            tiny.height = sh;
+            const tctx = tiny.getContext('2d');
+            tctx.imageSmoothingEnabled = false;
+            tctx.drawImage(src, 0, 0, src.width, src.height, 0, 0, sw, sh);
+            dctx.imageSmoothingEnabled = false;
+            dctx.drawImage(tiny, 0, 0, sw, sh, 0, 0, src.width, src.height);
+          }
+
+          ctx.drawImage(dst, r.x, r.y, r.w, r.h);
+          ctx.save();
+          ctx.fillStyle = 'rgba(17,24,39,0.1)';
+          ctx.fillRect(r.x, r.y, r.w, r.h);
+          ctx.strokeStyle = 'rgba(255,255,255,0.75)';
+          ctx.lineWidth = 1.2;
+          ctx.strokeRect(r.x, r.y, r.w, r.h);
+          ctx.restore();
+        }
+      } else if (shape.type === 'arrow') {
+        drawArrow(shape);
+      } else if (shape.type === 'text') {
+        ctx.font = `${Math.max(12, shape.w * 6)}px Arial`;
+        ctx.fillText(shape.text, shape.x1, shape.y1);
+      } else if (shape.type === 'number') {
+        const radius = Math.max(12, shape.w * 6);
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(shape.x1, shape.y1, radius, 0, Math.PI * 2);
+        ctx.fillStyle = shape.color;
+        ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = '#ffffff';
+        ctx.stroke();
+        ctx.fillStyle = '#ffffff';
+        ctx.font = `bold ${Math.max(12, radius)}px Arial`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(String(shape.n), shape.x1, shape.y1 + 0.5);
+        ctx.restore();
+      }
+    }
+
+    function drawSelectionBox(rect) {
+      if (!rect || rect.w < 2 || rect.h < 2) return;
+      ctx.save();
+      ctx.setLineDash([8, 4]);
+      ctx.strokeStyle = '#60a5fa';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(rect.x, rect.y, rect.w, rect.h);
+      ctx.fillStyle = 'rgba(59,130,246,0.12)';
+      ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
+      ctx.restore();
+    }
+
+    function render() {
+      if (!state.baseImage) return;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(state.baseImage, 0, 0, canvas.width, canvas.height);
+      state.shapes.forEach(drawShape);
+      if (state.draft && state.tool !== 'select') drawShape(state.draft);
+      if (state.selection) drawSelectionBox(state.selection);
+      if (state.draft && state.tool === 'select') drawSelectionBox(normRect(state.draft));
+    }
+
+    canvas.addEventListener('mousedown', (e) => {
+      if (!state.baseImage) return;
+      const p = getPos(e);
+
+      if (state.tool === 'number') {
+        state.shapes.push({ type: 'number', x1: p.x, y1: p.y, color: state.color, w: state.width, n: state.step++ });
+        updateNumberBadge();
+        render();
+        setStatus('Paso numerado agregado.');
+        return;
+      }
+
+      if (state.tool === 'text') {
+        const text = window.prompt('Texto de anotacion:');
+        if (text && text.trim()) {
+          state.shapes.push({ type: 'text', x1: p.x, y1: p.y, text: text.trim(), color: state.color, w: state.width });
+          render();
+          setStatus('Texto agregado.');
+        }
+        return;
+      }
+
+      state.drawing = true;
+      state.draft = {
+        type: state.tool,
+        x1: p.x,
+        y1: p.y,
+        x2: p.x,
+        y2: p.y,
+        color: state.color,
+        w: state.width,
+      };
+    });
+
+    canvas.addEventListener('mousemove', (e) => {
+      if (!state.drawing || !state.draft) return;
+      const p = getPos(e);
+      state.draft.x2 = p.x;
+      state.draft.y2 = p.y;
+      render();
+    });
+
+    window.addEventListener('mouseup', () => {
+      if (!state.drawing || !state.draft) return;
+
+      if (state.tool === 'select') {
+        const rect = normRect(state.draft);
+        state.selection = (rect.w > 4 && rect.h > 4) ? rect : null;
+        state.draft = null;
+        state.drawing = false;
+        render();
+        setStatus(state.selection ? 'Area seleccionada. Guardar exportara solo ese recorte.' : 'Seleccion cancelada.');
+        return;
+      }
+
+      state.shapes.push(state.draft);
+      state.draft = null;
+      state.drawing = false;
+      render();
+      setStatus('Anotacion agregada.');
+    });
+
+    document.getElementById('tool-select').addEventListener('click', () => setTool('select'));
+    document.getElementById('tool-rect').addEventListener('click', () => setTool('rect'));
+    document.getElementById('tool-arrow').addEventListener('click', () => setTool('arrow'));
+    document.getElementById('tool-text').addEventListener('click', () => setTool('text'));
+    document.getElementById('tool-highlight').addEventListener('click', () => setTool('highlight'));
+    document.getElementById('tool-blur').addEventListener('click', () => setTool('blur'));
+    document.getElementById('tool-number').addEventListener('click', () => setTool('number'));
+
+    const colorInput = document.getElementById('color');
+    if (colorInput) {
+      colorInput.addEventListener('input', (e) => {
+        state.color = e.target.value;
+      });
+    }
+
+    document.getElementById('width').addEventListener('input', (e) => {
+      state.width = Number(e.target.value) || 3;
+    });
+
+    document.getElementById('undo').addEventListener('click', () => {
+      const popped = state.shapes.pop();
+      if (popped && popped.type === 'number') {
+        state.step = Math.max(1, state.step - 1);
+        updateNumberBadge();
+      }
+      render();
+      setStatus('Se deshizo la ultima anotacion.');
+    });
+
+    document.getElementById('clear').addEventListener('click', () => {
+      state.shapes = [];
+      state.draft = null;
+      state.step = 1;
+      updateNumberBadge();
+      render();
+      setStatus('Anotaciones limpiadas.');
+    });
+
+    document.getElementById('clear-selection').addEventListener('click', () => {
+      state.selection = null;
+      render();
+      setStatus('Seleccion eliminada.');
+    });
+
+    function selectedCanvasDataUrl() {
+      if (!state.selection) return canvas.toDataURL('image/png');
+      const { x, y, w, h } = state.selection;
+      if (w < 2 || h < 2) return canvas.toDataURL('image/png');
+
+      const out = document.createElement('canvas');
+      out.width = Math.floor(w);
+      out.height = Math.floor(h);
+      const octx = out.getContext('2d');
+      octx.drawImage(canvas, x, y, w, h, 0, 0, out.width, out.height);
+      return out.toDataURL('image/png');
+    }
+
+    function closeEditorSoon() {
+      if (py && py.close_current_tab) {
+        setTimeout(() => py.close_current_tab(), 220);
+      }
+    }
+
+    function saveAnnotated() {
+      if (!state.baseImage) return;
+      const dataUrl = selectedCanvasDataUrl();
+
+      if (!py || !py.save_annotated_screenshot) {
+        setStatus('No hay bridge para guardar.');
+        return;
+      }
+
+      setStatus('Guardando imagen...');
+      py.save_annotated_screenshot(dataUrl, state.originalPath || '', (path) => {
+        if (path) setStatus(`Guardada en: ${path}`);
+        else setStatus('No se pudo guardar la imagen.');
+
+        if (path) closeEditorSoon();
+      });
+    }
+
+    function copyAnnotated() {
+      if (!state.baseImage) return;
+      const dataUrl = selectedCanvasDataUrl();
+
+      if (!py || !py.copy_annotated_screenshot) {
+        setStatus('No hay bridge para copiar.');
+        return;
+      }
+
+      setStatus('Copiando al portapapeles...');
+      py.copy_annotated_screenshot(dataUrl, state.originalPath || '', (ok) => {
+        if (ok) {
+          setStatus('Copiada al portapapeles.');
+          closeEditorSoon();
+        } else {
+          setStatus('No se pudo copiar la imagen.');
+        }
+      });
+    }
+
+    function cancelEditor() {
+      setStatus('Descartando captura...');
+
+      if (!py || !py.discard_screenshot) {
+        closeEditorSoon();
+        return;
+      }
+
+      py.discard_screenshot(state.originalPath || '', () => {
+        closeEditorSoon();
+      });
+    }
+
+    document.getElementById('save').addEventListener('click', saveAnnotated);
+    document.getElementById('copy').addEventListener('click', copyAnnotated);
+    document.getElementById('cancel').addEventListener('click', cancelEditor);
+
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        state.selection = null;
+        state.draft = null;
+        state.drawing = false;
+        render();
+        setStatus('Seleccion cancelada.');
+      }
+    });
+
+    function loadImage() {
+      const params = new URLSearchParams(window.location.search);
+      const raw = params.get('img');
+      if (!raw) {
+        setStatus('No se recibio imagen para anotar.');
+        return;
+      }
+
+      state.originalPath = raw;
+
+      const src = raw.startsWith('file://') ? raw : `file://${raw}`;
+      const img = new Image();
+      img.onload = () => {
+        state.baseImage = img;
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+        render();
+        updateNumberBadge();
+        setStatus('Captura cargada. Usa iconos de herramientas para documentar.');
+      };
+      img.onerror = () => setStatus('No se pudo cargar la captura.');
+      img.src = src;
+    }
+
+    loadImage();
+  </script>
+</body>
+</html>
