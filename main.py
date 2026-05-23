@@ -311,8 +311,13 @@ class DomainUAInterceptor(QWebEngineUrlRequestInterceptor):
         info.setHttpHeader(b"Accept-Language", b"es-ES,es;q=0.9,en;q=0.8")
         
         host = (url.host() or "").lower()
-        if "accounts.google.com" in host or "mail.google.com" in host or "perplexity.ai" in host:
+        if "accounts.google.com" in host or "mail.google.com" in host:
             info.setHttpHeader(b"User-Agent", self._ff_ua)
+        else:
+            # Perplexity (Cloudflare) valida estrictamente los Client Hints si decimos ser Chrome
+            info.setHttpHeader(b"Sec-Ch-Ua", b'"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"')
+            info.setHttpHeader(b"Sec-Ch-Ua-Mobile", b"?0")
+            info.setHttpHeader(b"Sec-Ch-Ua-Platform", b'"Windows"')
 
 
 def profile():
@@ -683,6 +688,15 @@ def profile():
         window.chrome = { runtime: {} };
         Object.defineProperty(navigator, 'languages', { get: () => ['es-ES', 'es', 'en'], configurable: true });
         Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5], configurable: true });
+        Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8, configurable: true });
+        Object.defineProperty(navigator, 'deviceMemory', { get: () => 8, configurable: true });
+        
+        const originalQuery = window.navigator.permissions.query;
+        window.navigator.permissions.query = parameters => (
+            parameters.name === 'notifications' ?
+                Promise.resolve({ state: Notification.permission }) :
+                originalQuery(parameters)
+        );
     } catch (_e) {}
 })();
         """)
