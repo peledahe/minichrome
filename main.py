@@ -313,11 +313,6 @@ class DomainUAInterceptor(QWebEngineUrlRequestInterceptor):
         host = (url.host() or "").lower()
         if "accounts.google.com" in host or "mail.google.com" in host:
             info.setHttpHeader(b"User-Agent", self._ff_ua)
-        else:
-            # Perplexity (Cloudflare) valida estrictamente los Client Hints si decimos ser Chrome
-            info.setHttpHeader(b"Sec-Ch-Ua", b'"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"')
-            info.setHttpHeader(b"Sec-Ch-Ua-Mobile", b"?0")
-            info.setHttpHeader(b"Sec-Ch-Ua-Platform", b'"Windows"')
 
 
 def profile():
@@ -678,32 +673,7 @@ def profile():
         pwd_capture.setWorldId(QWebEngineScript.ScriptWorldId.MainWorld)
         _prof.scripts().insert(pwd_capture)
 
-        # ── Stealth mínimo para evadir antibots (Cloudflare, Google, etc) ────────
-        stealth = QWebEngineScript()
-        stealth.setName("stealth")
-        stealth.setSourceCode("""
-(function(){
-    try {
-        Object.defineProperty(navigator, 'webdriver', { get: () => undefined, configurable: true });
-        window.chrome = { runtime: {} };
-        Object.defineProperty(navigator, 'languages', { get: () => ['es-ES', 'es', 'en'], configurable: true });
-        Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5], configurable: true });
-        Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8, configurable: true });
-        Object.defineProperty(navigator, 'deviceMemory', { get: () => 8, configurable: true });
-        
-        const originalQuery = window.navigator.permissions.query;
-        window.navigator.permissions.query = parameters => (
-            parameters.name === 'notifications' ?
-                Promise.resolve({ state: Notification.permission }) :
-                originalQuery(parameters)
-        );
-    } catch (_e) {}
-})();
-        """)
-        stealth.setInjectionPoint(QWebEngineScript.InjectionPoint.DocumentCreation)
-        stealth.setRunsOnSubFrames(False)
-        stealth.setWorldId(QWebEngineScript.ScriptWorldId.MainWorld)
-        _prof.scripts().insert(stealth)
+
 
     return _prof
 
