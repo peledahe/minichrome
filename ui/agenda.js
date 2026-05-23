@@ -52,6 +52,7 @@ const state = {
     pwFilter: 'all',
     pwShowSet: new Set(),
     pwEditId: null,
+    pwAutoSavePolicy: 'ask',
     kbModalStatus: 'pending'
 };
 
@@ -329,6 +330,35 @@ function bindPasswordEvents() {
             btn.classList.add('active');
         });
     });
+
+    const autoSavePolicySelect = document.getElementById('pw-autosave-policy-agenda');
+    if (autoSavePolicySelect) {
+        autoSavePolicySelect.addEventListener('change', async (e) => {
+            if (!pw || typeof pw.set_auto_save_policy !== 'function') return;
+            const nextPolicy = String(e.target.value || 'ask').toLowerCase();
+            state.pwAutoSavePolicy = ['ask', 'always', 'never'].includes(nextPolicy) ? nextPolicy : 'ask';
+            await pw.set_auto_save_policy(state.pwAutoSavePolicy);
+            const label = state.pwAutoSavePolicy === 'always'
+                ? 'Autoguardado: siempre'
+                : state.pwAutoSavePolicy === 'never'
+                    ? 'Autoguardado: nunca'
+                    : 'Autoguardado: preguntar';
+            notify(`${label}. Manual siempre permitido`, 'success');
+        });
+    }
+}
+
+async function pwLoadAutoSavePolicy() {
+    if (!pw || typeof pw.get_auto_save_policy !== 'function') return;
+    try {
+        const policy = String(await pw.get_auto_save_policy() || 'ask').toLowerCase();
+        state.pwAutoSavePolicy = ['ask', 'always', 'never'].includes(policy) ? policy : 'ask';
+    } catch (_err) {
+        state.pwAutoSavePolicy = 'ask';
+    }
+
+    const autoSavePolicySelect = document.getElementById('pw-autosave-policy-agenda');
+    if (autoSavePolicySelect) autoSavePolicySelect.value = state.pwAutoSavePolicy;
 }
 
 function notify(msg, type = 'success') {
@@ -1871,7 +1901,10 @@ document.getElementById('notes-board').addEventListener('dblclick', (e) => {
 async function pwLoad() {
     try {
         if (!pw) return;
-        const rows = await pw.get_passwords();
+        const [rows] = await Promise.all([
+            pw.get_passwords(),
+            pwLoadAutoSavePolicy()
+        ]);
         state.passwords = (rows || []).map((p) => ({
             ...p,
             type: p.type || ((p.site || '').includes('.') ? 'web' : 'app'),

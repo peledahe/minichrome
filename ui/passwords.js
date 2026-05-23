@@ -2,10 +2,23 @@ let pwBridge = null;
 let allPasswords = [];
 let currentEditId = null;
 let deleteId = null;
+let autoSavePolicy = 'ask';
 
 const pwdModal = document.getElementById('pwd-modal');
 const confirmModal = document.getElementById('confirm-modal');
 const searchInput = document.getElementById('search-input');
+const autoSavePolicySelect = document.getElementById('pw-autosave-policy');
+
+function normalizePolicy(policy) {
+    const val = String(policy || 'ask').toLowerCase();
+    return ['ask', 'always', 'never'].includes(val) ? val : 'ask';
+}
+
+function policyMessage(policy) {
+    if (policy === 'always') return 'Autoguardado: siempre guardar sin preguntar';
+    if (policy === 'never') return 'Autoguardado: nunca guardar automaticamente';
+    return 'Autoguardado: preguntar antes de guardar';
+}
 
 function escapeHtml(str) {
     return String(str || '')
@@ -37,7 +50,27 @@ function updateTypeUi(type) {
 // Inicializar QWebChannel
 new QWebChannel(qt.webChannelTransport, (channel) => {
     pwBridge = channel.objects.pw;
+    if (pwBridge && pwBridge.updated && typeof pwBridge.updated.connect === 'function') {
+        pwBridge.updated.connect(() => {
+            loadPasswords();
+        });
+    }
     wireEvents();
+    loadAutoSavePolicy();
+    loadPasswords();
+});
+
+window.addEventListener('pageshow', () => {
+    loadPasswords();
+});
+
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+        loadPasswords();
+    }
+});
+
+window.addEventListener('focus', () => {
     loadPasswords();
 });
 
@@ -86,6 +119,27 @@ function wireEvents() {
         });
         renderPasswords(filtered);
     });
+
+    if (autoSavePolicySelect) {
+        autoSavePolicySelect.addEventListener('change', async (e) => {
+            if (!pwBridge || typeof pwBridge.set_auto_save_policy !== 'function') return;
+            autoSavePolicy = normalizePolicy(e.target.value);
+            await pwBridge.set_auto_save_policy(autoSavePolicy);
+            showStickyNotification(`${policyMessage(autoSavePolicy)}. Manual siempre permitido.`);
+        });
+    }
+}
+
+async function loadAutoSavePolicy() {
+    if (!pwBridge || typeof pwBridge.get_auto_save_policy !== 'function') return;
+    try {
+        const policy = await pwBridge.get_auto_save_policy();
+        autoSavePolicy = normalizePolicy(policy);
+        if (autoSavePolicySelect) autoSavePolicySelect.value = autoSavePolicy;
+    } catch (_err) {
+        autoSavePolicy = 'ask';
+        if (autoSavePolicySelect) autoSavePolicySelect.value = autoSavePolicy;
+    }
 }
 
 async function loadPasswords() {

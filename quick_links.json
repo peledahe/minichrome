@@ -4,6 +4,10 @@
     "url": "https://github.com"
   },
   {
+    "name": "Copilot GitHub",
+    "url": "https://github.com/copilot"
+  },
+  {
     "name": "ChatGPT",
     "url": "https://chat.openai.com"
   },
@@ -12,15 +16,15 @@
     "url": "https://gemini.google.com"
   },
   {
-    "name": "Gmail",
-    "url": "https://gmail.com"
+    "name": "Copilot 360",
+    "url": "https://copilot.microsoft.com/"
   },
   {
     "name": "Proton",
     "url": "https://account.proton.me/apps"
   },
   {
-    "name": "Cipilot 360",
-    "url": "https://copilot.microsoft.com/"
+    "name": "Gmail",
+    "url": "https://mail.google.com/mail/u/0/#inbox"
   }
 ]

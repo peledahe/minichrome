@@ -1359,6 +1359,53 @@
         .pw-filter:hover { color: #fff; background: rgba(255,255,255,0.06); }
         .pw-filter.active { background: #2d2d35; color: #fff; font-weight: 600; }
 
+        .pw-autosave-wrap {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: rgba(255,255,255,0.04);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 10px;
+            padding: 7px 10px;
+            flex-shrink: 0;
+        }
+
+        .pw-autosave-copy {
+            display: flex;
+            flex-direction: column;
+            gap: 1px;
+            line-height: 1.15;
+        }
+
+        .pw-autosave-copy strong {
+            font-size: 0.78rem;
+            color: rgba(255,255,255,0.9);
+            font-weight: 600;
+            white-space: nowrap;
+        }
+
+        .pw-autosave-copy small {
+            font-size: 0.7rem;
+            color: rgba(255,255,255,0.45);
+            white-space: nowrap;
+        }
+
+        .pw-autosave-select {
+            min-width: 170px;
+            background: rgba(255,255,255,0.06);
+            border: 1px solid rgba(255,255,255,0.14);
+            border-radius: 8px;
+            color: #fff;
+            padding: 6px 9px;
+            font-family: inherit;
+            font-size: 0.78rem;
+            outline: none;
+        }
+
+        .pw-autosave-select:focus {
+            border-color: #6c5ce7;
+        }
+
         .pw-list {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
@@ -2186,6 +2233,17 @@
                         <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><path d="M21 2H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h7l-2 3v1h8v-1l-2-3h7c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 12H3V4h18v10z"/></svg>
                         Aplicaciones
                     </button>
+                </div>
+                <div class="pw-autosave-wrap" title="Solo aplica al guardado detectado automaticamente al iniciar sesion en sitios web">
+                    <div class="pw-autosave-copy">
+                        <strong>Autoguardado web</strong>
+                        <small>Manual siempre permitido</small>
+                    </div>
+                    <select id="pw-autosave-policy-agenda" class="pw-autosave-select" aria-label="Modo de autoguardado web">
+                        <option value="ask">Preguntar</option>
+                        <option value="always">Siempre</option>
+                        <option value="never">Nunca</option>
+                    </select>
                 </div>
                 <button class="ag-btn ag-btn-primary" id="pw-add-btn" style="white-space:nowrap;">+ Agregar</button>
             </div>

@@ -12,13 +12,13 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLineEdit, QPushButton, QLabel, QSizePolicy, QFrame,
     QGraphicsDropShadowEffect, QScrollArea, QListWidget, QListWidgetItem,
-    QDialog, QStackedLayout
+    QDialog, QStackedLayout, QDateEdit
 )
 from PyQt6.QtWebEngineWidgets import QWebEngineView
-from PyQt6.QtWebEngineCore import (QWebEngineProfile, QWebEnginePage, QWebEngineScript)
+from PyQt6.QtWebEngineCore import (QWebEngineProfile, QWebEnginePage, QWebEngineScript, QWebEngineSettings, QWebEngineUrlRequestInterceptor)
 from PyQt6.QtWebChannel import QWebChannel
 from PyQt6.QtCore import (QUrl, QUrlQuery, Qt, QSize, QTimer, QPropertyAnimation,
-                           QEasingCurve, QPoint, QRect, QObject, pyqtSlot, pyqtSignal)
+                           QEasingCurve, QPoint, QRect, QObject, pyqtSlot, pyqtSignal, QDate)
 from PyQt6.QtGui import QColor, QCursor, QFont, QIcon, QPixmap, QDesktopServices, QImage
 
 # ─── Config ──────────────────────────────────────────────────────────────────
@@ -113,9 +113,27 @@ def _db():
         ('homeUrl', 'https://www.google.com'),
         ('mediaPath', default_media_path),
         ('videoStartMuted', '0'),
-        ('videoSortBy', 'name-asc')
+        ('videoSortBy', 'name-asc'),
+        ('passwordAutoSavePolicy', 'ask')
     ]
     c.executemany("INSERT OR IGNORE INTO app_config(key,val) VALUES(?,?)", shared_defaults)
+
+    # Limpieza única de duplicados históricos en contraseñas (mismo sitio+usuario normalizados).
+    dedupe_flag = c.execute("SELECT val FROM app_config WHERE key='passwordsDedupV1'").fetchone()
+    if not dedupe_flag or dedupe_flag[0] != '1':
+        dup_rows = c.execute(
+            "SELECT lower(trim(site)) AS s_key, lower(trim(username)) AS u_key, MAX(id) AS keep_id "
+            "FROM passwords "
+            "WHERE trim(site)<>'' AND trim(username)<>'' "
+            "GROUP BY s_key, u_key HAVING COUNT(*) > 1"
+        ).fetchall()
+        for s_key, u_key, keep_id in dup_rows:
+            c.execute(
+                "DELETE FROM passwords "
+                "WHERE lower(trim(site))=? AND lower(trim(username))=? AND id<>?",
+                (s_key, u_key, keep_id)
+            )
+        c.execute("INSERT OR REPLACE INTO app_config(key,val) VALUES(?,?)", ('passwordsDedupV1', '1'))
 
     # Asegurar claves de configuracion para visor de imagenes
     default_image_path = os.path.expanduser("~/Pictures")
@@ -200,6 +218,59 @@ def del_history(hid):
 def clear_history():
     c = _db(); c.execute("DELETE FROM history"); c.commit(); c.close()
 
+def _normalize_domain(value: str) -> str:
+    raw = (value or '').strip().lower()
+    if not raw:
+        return ''
+    if '://' not in raw:
+        raw = 'https://' + raw
+    try:
+        host = (urlparse(raw).hostname or '').lower()
+    except Exception:
+        host = ''
+    if host.startswith('www.'):
+        host = host[4:]
+    return host
+
+def clear_history_by_domain(domain: str) -> int:
+    target = _normalize_domain(domain)
+    if not target:
+        return 0
+
+    c = _db()
+    rows = c.execute("SELECT id, url FROM history").fetchall()
+    ids = []
+    for hid, url in rows:
+        host = _normalize_domain(url)
+        if not host:
+            continue
+        if host == target or host.endswith('.' + target):
+            ids.append((hid,))
+
+    if ids:
+        c.executemany("DELETE FROM history WHERE id=?", ids)
+        c.commit()
+    c.close()
+    return len(ids)
+
+def clear_history_by_dates(start_date: str, end_date: str) -> int:
+    start = (start_date or '').strip()
+    end = (end_date or '').strip()
+    if not start:
+        return 0
+    if not end:
+        end = start
+
+    c = _db()
+    c.execute(
+        "DELETE FROM history WHERE date(ts) BETWEEN date(?) AND date(?)",
+        (start, end)
+    )
+    removed = c.total_changes
+    c.commit()
+    c.close()
+    return int(removed)
+
 def load_quick_links():
     """Carga los quick links desde el archivo JSON local."""
     try:
@@ -223,18 +294,40 @@ _db().close()
 
 # ─── Perfil persistente ───────────────────────────────────────────────────────
 _prof = None
+_ua_interceptor = None
+
+
+class DomainUAInterceptor(QWebEngineUrlRequestInterceptor):
+    """Fuerza cabeceras adicionales para evadir detecciones y bloqueos de Google."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._ff_ua = b"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:124.0) Gecko/20100101 Firefox/124.0"
+
+    def interceptRequest(self, info):
+        url = info.requestUrl()
+        if url.scheme().lower() not in ("http", "https"):
+            return
+            
+        info.setHttpHeader(b"Accept-Language", b"es-ES,es;q=0.9,en;q=0.8")
+        
+        host = (url.host() or "").lower()
+        if "accounts.google.com" in host or "mail.google.com" in host or "perplexity.ai" in host:
+            info.setHttpHeader(b"User-Agent", self._ff_ua)
+
+
 def profile():
-    global _prof
+    global _prof, _ua_interceptor
     if not _prof:
-        _prof = QWebEngineProfile.defaultProfile()
+        _prof = QWebEngineProfile("MinichromeProfile")
+        # Usamos un UA de Windows moderno (Chrome 124) que suele tener menos restricciones
+        _prof.setHttpUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+        _prof.setPersistentStoragePath(CACHE)
+        _prof.setCachePath(os.path.join(CACHE, "httpcache"))
+        _prof.setHttpCacheType(QWebEngineProfile.HttpCacheType.DiskHttpCache)
         _prof.setPersistentCookiesPolicy(QWebEngineProfile.PersistentCookiesPolicy.ForcePersistentCookies)
 
-        # User-agent real de Chrome para evitar CAPTCHA de Google
-        _prof.setHttpUserAgent(
-            "Mozilla/5.0 (X11; Linux x86_64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/124.0.0.0 Safari/537.36"
-        )
+        _ua_interceptor = DomainUAInterceptor(_prof)
+        _prof.setUrlRequestInterceptor(_ua_interceptor)
 
         # CSS Global (scrollbars personalizados delgados y sutiles)
         s = QWebEngineScript()
@@ -265,9 +358,57 @@ def profile():
         pwd_capture.setName("pwd_capture")
         pwd_capture.setSourceCode("""
 (function(){
+    const pageHost = (location.hostname || '').toLowerCase();
+    const skipPwdHelperDomains = [
+        'copilot.microsoft.com',
+        'perplexity.ai',
+        'chatgpt.com',
+        'openai.com',
+        'claude.ai',
+        'bing.com',
+        'google.com',
+        'microsoft.com',
+        'challenges.cloudflare.com',
+        'hcaptcha.com',
+        'recaptcha.net'
+    ];
+    if (skipPwdHelperDomains.some((d) => pageHost === d || pageHost.endsWith('.' + d))) {
+        return;
+    }
+
     let lastUserSeen = '';
     let lastCaptureKey = '';
-    let autofillRequestedForHost = '';
+    let lastAutofillHost = '';
+    let lastAutofillRequestTs = 0;
+    let lastRememberApplyTs = 0;
+    let rememberScanCacheTs = 0;
+    let rememberScanCache = [];
+    let observerDebounceTimer = null;
+    const rememberSessionStorageKey = '__mc_remember_session_pref_v1';
+
+    function normalizeText(value) {
+        return String(value || '')
+            .toLowerCase()
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .trim();
+    }
+
+    function getRememberPref() {
+        try {
+            return localStorage.getItem(rememberSessionStorageKey);
+        } catch (_err) {
+            return null;
+        }
+    }
+
+    function setRememberPref(enabled) {
+        try {
+            localStorage.setItem(rememberSessionStorageKey, enabled ? '1' : '0');
+        } catch (_err) {
+            // Ignorar errores de storage en sitios restringidos.
+        }
+    }
 
     function isVisible(el) {
         if (!el) return false;
@@ -280,6 +421,82 @@ def profile():
     function findPasswordField() {
         const fields = Array.from(document.querySelectorAll('input[type="password"]'));
         return fields.find(isVisible) || null;
+    }
+
+    function getCheckboxContextText(checkbox) {
+        let text = [
+            checkbox.getAttribute('aria-label') || '',
+            checkbox.name || '',
+            checkbox.id || '',
+            checkbox.className || ''
+        ].join(' ');
+
+        const parentLabel = checkbox.closest('label');
+        if (parentLabel) {
+            text += ' ' + (parentLabel.innerText || parentLabel.textContent || '');
+        }
+
+        if (checkbox.id) {
+            try {
+                const explicitLabel = document.querySelector(`label[for="${checkbox.id}"]`);
+                if (explicitLabel) {
+                    text += ' ' + (explicitLabel.innerText || explicitLabel.textContent || '');
+                }
+            } catch (_err) {
+                // Selector invalido por IDs especiales.
+            }
+        }
+
+        return normalizeText(text);
+    }
+
+    function isRememberSessionCheckbox(checkbox) {
+        if (!checkbox || checkbox.tagName !== 'INPUT') return false;
+        if ((checkbox.type || '').toLowerCase() !== 'checkbox') return false;
+        const txt = getCheckboxContextText(checkbox);
+        return /(mantener|recordar|remember|stay signed|keep signed|sesion|session|confi|trust|logged in|log in)/.test(txt);
+    }
+
+    function findRememberSessionCheckboxes(forceRefresh) {
+        const now = Date.now();
+        if (!forceRefresh && (now - rememberScanCacheTs) < 1200) {
+            return rememberScanCache;
+        }
+
+        // Solo tiene sentido en vistas de login.
+        if (!findPasswordField()) {
+            rememberScanCache = [];
+            rememberScanCacheTs = now;
+            return rememberScanCache;
+        }
+
+        rememberScanCache = Array.from(document.querySelectorAll('input[type="checkbox"]')).filter((cb) => {
+            return isVisible(cb) && isRememberSessionCheckbox(cb);
+        });
+        rememberScanCacheTs = now;
+        return rememberScanCache;
+    }
+
+    function applyRememberSessionPreference() {
+        if (getRememberPref() !== '1') return;
+        const now = Date.now();
+        if ((now - lastRememberApplyTs) < 1200) return;
+        lastRememberApplyTs = now;
+
+        const matches = findRememberSessionCheckboxes(false);
+        matches.forEach((cb) => {
+            if (cb.checked) return;
+            cb.checked = true;
+            cb.dispatchEvent(new Event('input', { bubbles: true }));
+            cb.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+    }
+
+    function captureRememberSessionPreference() {
+        const matches = findRememberSessionCheckboxes(true);
+        if (!matches.length) return;
+        const anyChecked = matches.some((cb) => cb.checked);
+        setRememberPref(anyChecked);
     }
 
     function findUserField(passField) {
@@ -371,8 +588,14 @@ def profile():
         const passField = findPasswordField();
         if (!passField) return;
         const host = window.location.hostname || '';
-        if (!host || host === autofillRequestedForHost) return;
-        autofillRequestedForHost = host;
+        if (!host) return;
+
+        const now = Date.now();
+        // Reintentos suaves para formularios que montan/rehidratan campos tarde.
+        if (host === lastAutofillHost && (now - lastAutofillRequestTs) < 1600) return;
+        lastAutofillHost = host;
+        lastAutofillRequestTs = now;
+
         console.log('MINICHROME_AUTOFILL_REQUEST:' + JSON.stringify({
             host: host,
             url: window.location.href
@@ -383,7 +606,16 @@ def profile():
         trackUserFromEvent(e.target);
     }, true);
 
+    document.addEventListener('change', (e) => {
+        const target = e.target;
+        if (target && isRememberSessionCheckbox(target)) {
+            rememberScanCacheTs = 0;
+            setRememberPref(!!target.checked);
+        }
+    }, true);
+
     window.addEventListener('submit', () => {
+        captureRememberSessionPreference();
         setTimeout(emitPasswordCapture, 120);
     }, true);
 
@@ -400,24 +632,32 @@ def profile():
         if (!btn) return;
         const text = ((btn.innerText || btn.value || '') + ' ' + (btn.getAttribute('aria-label') || '')).toLowerCase();
         if (/siguiente|continuar|entrar|ingresar|acceder|login|log in|sign in|next/.test(text)) {
+            captureRememberSessionPreference();
             setTimeout(emitPasswordCapture, 180);
         }
     }, true);
 
     let bootChecks = 0;
     const bootTimer = setInterval(() => {
+        applyRememberSessionPreference();
         maybeRequestAutofill();
         bootChecks += 1;
         if (bootChecks >= 6) clearInterval(bootTimer);
     }, 600);
 
     const observer = new MutationObserver(() => {
-        maybeRequestAutofill();
+        if (observerDebounceTimer) return;
+        observerDebounceTimer = setTimeout(() => {
+            observerDebounceTimer = null;
+            applyRememberSessionPreference();
+            maybeRequestAutofill();
+        }, 220);
     });
 
     const startObserver = () => {
         if (!document.body) return;
         observer.observe(document.body, { childList: true, subtree: true });
+        applyRememberSessionPreference();
         maybeRequestAutofill();
     };
 
@@ -429,53 +669,21 @@ def profile():
 })();
         """)
         pwd_capture.setInjectionPoint(QWebEngineScript.InjectionPoint.DocumentReady)
-        pwd_capture.setRunsOnSubFrames(True)
+        pwd_capture.setRunsOnSubFrames(False)
         pwd_capture.setWorldId(QWebEngineScript.ScriptWorldId.MainWorld)
         _prof.scripts().insert(pwd_capture)
 
-        # ── Script anti-fingerprinting (stealth) ─────────────────────────────
-        # Ejecutado en MainWorld ANTES del JS de la página para ocultar QtWebEngine
+        # ── Stealth mínimo para evadir antibots (Cloudflare, Google, etc) ────────
         stealth = QWebEngineScript()
         stealth.setName("stealth")
         stealth.setSourceCode("""
 (function(){
-    // 1. Ocultar navigator.webdriver
-    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-
-    // 2. Simular window.chrome (ausente en QtWebEngine, Google lo verifica)
-    window.chrome = {
-        runtime: { id: undefined, connect: function(){}, sendMessage: function(){} },
-        loadTimes: function(){ return {}; },
-        csi: function(){ return {}; },
-        app: { isInstalled: false }
-    };
-
-    // 3. Plugins no vacíos (Chrome real siempre tiene plugins)
-    Object.defineProperty(navigator, 'plugins', {
-        get: () => {
-            const arr = [
-                { name:'Chrome PDF Plugin', filename:'internal-pdf-viewer', description:'Portable Document Format' },
-                { name:'Chrome PDF Viewer', filename:'mhjfbmdgcfjbbpaeojofohoefgiehjai', description:'' },
-                { name:'Native Client', filename:'internal-nacl-plugin', description:'' }
-            ];
-            arr.item = (i) => arr[i];
-            arr.namedItem = (n) => arr.find(p=>p.name===n)||null;
-            arr.refresh = function(){};
-            return arr;
-        }
-    });
-
-    // 4. Idiomas consistentes con el User-Agent
-    Object.defineProperty(navigator, 'languages', { get: () => ['es-GT', 'es', 'en-US', 'en'] });
-
-    // 5. Permissions API no delata automatización
-    const origQuery = window.navigator.permissions && window.navigator.permissions.query;
-    if (origQuery) {
-        window.navigator.permissions.query = (p) =>
-            p.name === 'notifications'
-                ? Promise.resolve({ state: Notification.permission })
-                : origQuery(p);
-    }
+    try {
+        Object.defineProperty(navigator, 'webdriver', { get: () => undefined, configurable: true });
+        window.chrome = { runtime: {} };
+        Object.defineProperty(navigator, 'languages', { get: () => ['es-ES', 'es', 'en'], configurable: true });
+        Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5], configurable: true });
+    } catch (_e) {}
 })();
         """)
         stealth.setInjectionPoint(QWebEngineScript.InjectionPoint.DocumentCreation)
@@ -1415,6 +1623,39 @@ class PasswordBridge(QObject):
             return t
         return 'web' if '.' in (site or '') else 'app'
 
+    def _find_existing_id(self, c, site, user, exclude_id=None):
+        base_sql = (
+            "SELECT id FROM passwords "
+            "WHERE lower(trim(site))=lower(trim(?)) "
+            "AND lower(trim(username))=lower(trim(?))"
+        )
+        params = [site, user]
+        if exclude_id:
+            base_sql += " AND id<>?"
+            params.append(int(exclude_id))
+        row = c.execute(base_sql + " ORDER BY id ASC LIMIT 1", tuple(params)).fetchone()
+        return int(row[0]) if row else None
+
+    def _normalize_policy(self, policy):
+        val = (policy or 'ask').strip().lower()
+        return val if val in ('ask', 'always', 'never') else 'ask'
+
+    @pyqtSlot(result=str)
+    def get_auto_save_policy(self):
+        c = _db()
+        row = c.execute("SELECT val FROM app_config WHERE key='passwordAutoSavePolicy'").fetchone()
+        c.close()
+        return self._normalize_policy(row[0] if row else 'ask')
+
+    @pyqtSlot(str)
+    def set_auto_save_policy(self, policy):
+        val = self._normalize_policy(policy)
+        c = _db()
+        c.execute("INSERT OR REPLACE INTO app_config(key,val) VALUES(?,?)", ('passwordAutoSavePolicy', val))
+        c.commit()
+        c.close()
+        self.updated.emit()
+
     @pyqtSlot(result=list)
     def get_passwords(self):
         c = _db()
@@ -1438,14 +1679,19 @@ class PasswordBridge(QObject):
 
     @pyqtSlot(str, str, str)
     def save_password(self, site, user, pwd):
+        site = (site or '').strip()
+        user = (user or '').strip()
+        pwd = pwd or ''
+        if not site or not user or not pwd:
+            return
+
         c = _db()
-        # Verificar si ya existe para ese sitio y usuario para actualizar o insertar
-        existing = c.execute("SELECT id FROM passwords WHERE site=? AND username=?", (site, user)).fetchone()
+        existing_id = self._find_existing_id(c, site, user)
         pwd_type = self._normalize_type(site, '')
-        if existing:
+        if existing_id:
             c.execute(
                 "UPDATE passwords SET password=?, type=?, ts=CURRENT_TIMESTAMP WHERE id=?",
-                (pwd, pwd_type, existing[0])
+                (pwd, pwd_type, existing_id)
             )
         else:
             c.execute(
@@ -1457,22 +1703,46 @@ class PasswordBridge(QObject):
 
     @pyqtSlot(int, str, str, str, str, str, str, result=int)
     def upsert_password(self, pid, site, user, pwd, pwd_type, url, notes):
+        site = (site or '').strip()
+        user = (user or '').strip()
+        pwd = pwd or ''
+        if not site or not user or not pwd:
+            return 0
+
         c = _db()
         norm_type = self._normalize_type(site, pwd_type)
         row = c.execute("SELECT id FROM passwords WHERE id=?", (pid,)).fetchone() if pid else None
 
         if row:
-            c.execute(
-                "UPDATE passwords SET site=?, username=?, password=?, type=?, url=?, notes=?, ts=CURRENT_TIMESTAMP WHERE id=?",
-                (site, user, pwd, norm_type, url or '', notes or '', pid)
-            )
-            new_id = pid
+            duplicate_id = self._find_existing_id(c, site, user, exclude_id=pid)
+            if duplicate_id:
+                # Unificar en un solo registro cuando una edición colisiona con otro ya existente.
+                c.execute(
+                    "UPDATE passwords SET site=?, username=?, password=?, type=?, url=?, notes=?, ts=CURRENT_TIMESTAMP WHERE id=?",
+                    (site, user, pwd, norm_type, url or '', notes or '', duplicate_id)
+                )
+                c.execute("DELETE FROM passwords WHERE id=?", (pid,))
+                new_id = duplicate_id
+            else:
+                c.execute(
+                    "UPDATE passwords SET site=?, username=?, password=?, type=?, url=?, notes=?, ts=CURRENT_TIMESTAMP WHERE id=?",
+                    (site, user, pwd, norm_type, url or '', notes or '', pid)
+                )
+                new_id = pid
         else:
-            c.execute(
-                "INSERT INTO passwords(site, username, password, type, url, notes) VALUES(?,?,?,?,?,?)",
-                (site, user, pwd, norm_type, url or '', notes or '')
-            )
-            new_id = c.execute("SELECT last_insert_rowid()").fetchone()[0]
+            existing_id = self._find_existing_id(c, site, user)
+            if existing_id:
+                c.execute(
+                    "UPDATE passwords SET password=?, type=?, url=?, notes=?, ts=CURRENT_TIMESTAMP WHERE id=?",
+                    (pwd, norm_type, url or '', notes or '', existing_id)
+                )
+                new_id = existing_id
+            else:
+                c.execute(
+                    "INSERT INTO passwords(site, username, password, type, url, notes) VALUES(?,?,?,?,?,?)",
+                    (site, user, pwd, norm_type, url or '', notes or '')
+                )
+                new_id = c.execute("SELECT last_insert_rowid()").fetchone()[0]
 
         c.commit(); c.close()
         self.updated.emit()
@@ -1520,24 +1790,32 @@ class WebPage(QWebEnginePage):
         url_host = self._normalized_host(url)
         ranked = []
         for row in rows:
-            saved_host = self._normalized_host(row[1])
-            if not saved_host:
+            # Acepta credenciales guardadas con dominio en "site" o en "url"
+            # para que Llaves de Agenda funcione como fuente de autofill.
+            candidates = set()
+            saved_site_host = self._normalized_host(row[1] or "")
+            saved_url_host = self._normalized_host(row[5] or "")
+            if saved_site_host:
+                candidates.add(saved_site_host)
+            if saved_url_host:
+                candidates.add(saved_url_host)
+            if not candidates:
                 continue
 
             score = 0
-            if host == saved_host:
-                score = max(score, 120)
-            if host.endswith("." + saved_host):
-                score = max(score, 110)
-            if saved_host.endswith("." + host):
-                score = max(score, 95)
+            for candidate in candidates:
+                if host == candidate:
+                    score = max(score, 120)
+                if host.endswith("." + candidate):
+                    score = max(score, 110)
+                if candidate.endswith("." + host):
+                    score = max(score, 95)
 
-            saved_url_host = self._normalized_host(row[5] or "")
-            if url_host and saved_url_host:
-                if url_host == saved_url_host:
-                    score = max(score, 115)
-                elif url_host.endswith("." + saved_url_host):
-                    score = max(score, 105)
+                if url_host:
+                    if url_host == candidate:
+                        score = max(score, 115)
+                    elif url_host.endswith("." + candidate):
+                        score = max(score, 105)
 
             if score <= 0:
                 continue
@@ -1583,9 +1861,30 @@ class WebPage(QWebEnginePage):
         if (!next) return false;
         if (el.value === next) return true;
         el.focus();
-        el.value = next;
-        el.dispatchEvent(new Event('input', {{ bubbles: true }}));
+
+        // Algunos frameworks (React/Vue) ignoran asignaciones directas sin setter nativo.
+        const proto = Object.getPrototypeOf(el);
+        const descriptor = proto ? Object.getOwnPropertyDescriptor(proto, 'value') : null;
+        if (descriptor && typeof descriptor.set === 'function') {{
+            descriptor.set.call(el, next);
+        }} else {{
+            el.value = next;
+        }}
+
+        try {{
+            el.dispatchEvent(new InputEvent('input', {{
+                bubbles: true,
+                cancelable: true,
+                data: next,
+                inputType: 'insertText'
+            }}));
+        }} catch (_err) {{
+            el.dispatchEvent(new Event('input', {{ bubbles: true }}));
+        }}
+
         el.dispatchEvent(new Event('change', {{ bubbles: true }}));
+        el.dispatchEvent(new KeyboardEvent('keyup', {{ bubbles: true, key: 'Unidentified' }}));
+        el.blur();
         return true;
     }}
 
@@ -1640,7 +1939,9 @@ class WebPage(QWebEnginePage):
 
         c = sqlite3.connect(DB)
         existing = c.execute(
-            "SELECT id, password FROM passwords WHERE site=? AND username=?",
+            "SELECT id, password FROM passwords "
+            "WHERE lower(trim(site))=lower(trim(?)) AND lower(trim(username))=lower(trim(?)) "
+            "ORDER BY id ASC LIMIT 1",
             (site, user)
         ).fetchone()
 
@@ -1667,6 +1968,72 @@ class WebPage(QWebEnginePage):
         if vw and hasattr(vw, "main_win"):
             Notif("Contraseña " + action, f"{user} en {site}", vw.main_win)
 
+    def _get_pwd_policy(self) -> str:
+        c = _db()
+        row = c.execute("SELECT val FROM app_config WHERE key='passwordAutoSavePolicy'").fetchone()
+        c.close()
+        policy = (row[0] if row else 'ask') or 'ask'
+        policy = policy.strip().lower()
+        return policy if policy in ('ask', 'always', 'never') else 'ask'
+
+    def _set_pwd_policy(self, policy: str):
+        val = (policy or 'ask').strip().lower()
+        if val not in ('ask', 'always', 'never'):
+            val = 'ask'
+        c = _db()
+        c.execute("INSERT OR REPLACE INTO app_config(key,val) VALUES(?,?)", ('passwordAutoSavePolicy', val))
+        c.commit()
+        c.close()
+
+    def _ask_save_password(self, site: str, user: str) -> str:
+        vw = self.view()
+        parent = vw.main_win if (vw and hasattr(vw, 'main_win')) else vw
+
+        d = QDialog(parent)
+        d.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
+        d.setStyleSheet(
+            "QDialog{background:#11111a; border:1px solid rgba(255,255,255,0.1); border-radius:12px;}"
+        )
+
+        v = QVBoxLayout(d)
+        v.setContentsMargins(24, 24, 24, 24)
+        v.setSpacing(12)
+
+        t = QLabel("Guardar contraseña")
+        t.setStyleSheet("color:white; font-size:16px; font-weight:bold;")
+        v.addWidget(t)
+
+        m = QLabel(f"¿Quieres guardar la clave de {user} en {site}?")
+        m.setStyleSheet("color:#aaa; font-size:13px;")
+        m.setWordWrap(True)
+        v.addWidget(m)
+
+        h = QHBoxLayout()
+        h.setSpacing(10)
+        h.addStretch()
+
+        choice = {'value': 'skip'}
+
+        btn_no = QPushButton("No guardar")
+        btn_no.setStyleSheet(BTN_NAV)
+        btn_no.clicked.connect(lambda: (choice.__setitem__('value', 'skip'), d.accept()))
+
+        btn_never = QPushButton("Nunca guardar")
+        btn_never.setStyleSheet(BTN_NAV + "background:rgba(255,95,87,0.08); color:#ff8f87;")
+        btn_never.clicked.connect(lambda: (choice.__setitem__('value', 'never'), d.accept()))
+
+        btn_yes = QPushButton("Guardar")
+        btn_yes.setStyleSheet(BTN_NAV + "background:rgba(81,162,255,0.12); color:#cfe6ff;")
+        btn_yes.clicked.connect(lambda: (choice.__setitem__('value', 'save'), d.accept()))
+
+        h.addWidget(btn_no)
+        h.addWidget(btn_never)
+        h.addWidget(btn_yes)
+        v.addLayout(h)
+
+        d.exec()
+        return choice['value']
+
     def javaScriptConsoleMessage(self, level, message, line, source):
         if message.startswith("MINICHROME_LINKS:"):
             save_quick_links(message[len("MINICHROME_LINKS:"):])
@@ -1678,7 +2045,7 @@ class WebPage(QWebEnginePage):
                     return
 
                 now_ts = time.time()
-                if host == self._last_autofill_host and (now_ts - self._last_autofill_ts) < 3.0:
+                if host == self._last_autofill_host and (now_ts - self._last_autofill_ts) < 0.9:
                     return
 
                 self._last_autofill_host = host
@@ -1713,19 +2080,28 @@ class WebPage(QWebEnginePage):
                 if existing and (existing[1] or "") == pwd:
                     return
 
-                action_txt = "actualizar" if existing else "guardar"
+                policy = self._get_pwd_policy()
+                if policy == 'never':
+                    return
+                if policy == 'ask':
+                    decision = self._ask_save_password(site, user)
+                    if decision == 'never':
+                        self._set_pwd_policy('never')
+                        vw = self.view()
+                        if vw and hasattr(vw, 'main_win'):
+                            Notif("Auto-guardado desactivado", "No se volveran a solicitar claves", vw.main_win)
+                        return
+                    if decision != 'save':
+                        return
 
-                def show_prompt():
-                    msg = f"¿Deseas {action_txt} la contraseña para {user} en {site}?"
-                    if self.runJavaScriptConfirm(None, msg):
-                        self._save_or_update_password({
-                            "site": site,
-                            "user": user,
-                            "pwd": pwd,
-                            "url": data.get("url") or ""
-                        })
-
-                QTimer.singleShot(350, show_prompt)
+                # Persistencia automática para que el autollenado use inmediatamente
+                # las credenciales en el área Llaves de Agenda.
+                self._save_or_update_password({
+                    "site": site,
+                    "user": user,
+                    "pwd": pwd,
+                    "url": data.get("url") or ""
+                })
             except Exception as e:
                 print(f"[Passwords] Error al capturar: {e}")
         else:
@@ -1761,9 +2137,11 @@ class WebView(QWebEngineView):
     def __init__(self, main_win, url=""):
         super().__init__()
         self.main_win = main_win
+        self._was_maximized_before_web_fullscreen = False
         page = WebPage(profile(), self)
         self.setPage(page)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.settings().setAttribute(QWebEngineSettings.WebAttribute.FullScreenSupportEnabled, True)
         
         # Canal de comunicación para la Agenda
         self._channel = QWebChannel(self)
@@ -1774,6 +2152,7 @@ class WebView(QWebEngineView):
         self.page().setWebChannel(self._channel)
 
         page.geometryChangeRequested.connect(self._ignore_geom)
+        page.fullScreenRequested.connect(self._handle_fullscreen_request)
         if url:
             self.load(QUrl(url))
         self.loadFinished.connect(self._on_load)
@@ -1783,6 +2162,22 @@ class WebView(QWebEngineView):
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setMinimumSize(0, 0)
         self.setMaximumSize(16777215, 16777215)
+
+    def _handle_fullscreen_request(self, request):
+        """Sincroniza Fullscreen API web con fullscreen real de la ventana Qt."""
+        enable_fullscreen = bool(request.toggleOn())
+        request.accept()
+
+        if enable_fullscreen:
+            self._was_maximized_before_web_fullscreen = self.main_win.isMaximized()
+            self.main_win.showFullScreen()
+            return
+
+        if self.main_win.isFullScreen():
+            if self._was_maximized_before_web_fullscreen:
+                self.main_win.showMaximized()
+            else:
+                self.main_win.showNormal()
 
 
     def _on_load(self, ok):
@@ -2704,37 +3099,314 @@ class Minichrome(QMainWindow):
     def _clear_hist(self):
         d = QDialog(self)
         d.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
-        d.setStyleSheet("QDialog{background:#11111a; border:1px solid rgba(255,255,255,0.1); border-radius:12px;}")
-        v = QVBoxLayout(d); v.setContentsMargins(20,20,20,20)
-        v.addWidget(QLabel("<b style='color:white; font-size:14px;'>¿Borrar todo el historial?</b>"))
-        v.addWidget(QLabel("<span style='color:#aaa; font-size:12px;'>Se perderán los registros de sitios visitados.</span>"))
+        d.setStyleSheet(
+            """
+            QDialog{background:qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 rgba(14,20,36,0.98), stop:1 rgba(17,17,26,0.98));
+                    border:1px solid rgba(81,162,255,0.32); border-radius:14px;}
+            QLabel{background:transparent; color:#d7def5;}
+            """
+        )
+        v = QVBoxLayout(d); v.setContentsMargins(20,20,20,20); v.setSpacing(10)
+        v.addWidget(QLabel("<b style='color:#ffffff; font-size:15px;'>🗑️ Limpiar Historial</b>"))
+        v.addWidget(QLabel("<span style='color:rgba(220,230,255,0.75); font-size:12px;'>Elige cómo quieres borrar registros de navegación.</span>"))
+
+        body = QFrame()
+        body.setStyleSheet("QFrame{background:rgba(81,162,255,0.08); border:1px solid rgba(81,162,255,0.2); border-radius:10px;}")
+        body_l = QVBoxLayout(body)
+        body_l.setContentsMargins(12,12,12,12)
+        body_l.setSpacing(8)
+        body_l.addWidget(QLabel("<span style='color:#81a2ff; font-size:11px; letter-spacing:0.4px;'>Opciones disponibles</span>"))
+        body_l.addWidget(QLabel("<span style='color:#cfd8f6; font-size:12px;'>• Por dominio\n• Por rango de fechas\n• Borrado completo</span>"))
+        v.addWidget(body)
+
+        action = {'value': 'cancel'}
         h = QHBoxLayout()
-        bc = QPushButton("Cancelar"); bc.setStyleSheet(BTN_NAV); bc.clicked.connect(d.reject)
-        ba = QPushButton("Borrar"); ba.setStyleSheet(BTN_NAV + "color:#ff5f57;"); ba.clicked.connect(d.accept)
+        h.setSpacing(8)
+
+        BTN_NEUTRAL = "QPushButton{background:rgba(108,117,125,0.30); border:1px solid rgba(198,204,214,0.45); border-radius:8px; color:#f0f4ff; padding:8px 12px; font-size:12px; font-weight:600;} QPushButton:hover{background:rgba(108,117,125,0.45); color:white;}"
+        BTN_INFO = "QPushButton{background:rgba(25,118,210,0.40); border:1px solid rgba(127,190,255,0.70); border-radius:8px; color:#e6f4ff; padding:8px 12px; font-size:12px; font-weight:600;} QPushButton:hover{background:rgba(25,118,210,0.55); color:white;}"
+        BTN_MAGIC = "QPushButton{background:rgba(123,31,162,0.42); border:1px solid rgba(216,165,255,0.72); border-radius:8px; color:#f3e5ff; padding:8px 12px; font-size:12px; font-weight:600;} QPushButton:hover{background:rgba(123,31,162,0.58); color:white;}"
+        BTN_DANGER = "QPushButton{background:rgba(198,40,40,0.42); border:1px solid rgba(255,166,166,0.72); border-radius:8px; color:#ffe6e6; padding:8px 12px; font-size:12px; font-weight:700;} QPushButton:hover{background:rgba(198,40,40,0.58); color:white;}"
+
+        bc = QPushButton("↩ Cancelar")
+        bc.setStyleSheet(BTN_NEUTRAL)
+        bc.clicked.connect(lambda: (action.__setitem__('value', 'cancel'), d.accept()))
+
+        bd = QPushButton("🌐 Por dominio")
+        bd.setStyleSheet(BTN_INFO)
+        bd.clicked.connect(lambda: (action.__setitem__('value', 'domain'), d.accept()))
+
+        bf = QPushButton("📅 Por fechas")
+        bf.setStyleSheet(BTN_MAGIC)
+        bf.clicked.connect(lambda: (action.__setitem__('value', 'dates'), d.accept()))
+
+        ba = QPushButton("🗑 Borrar todo")
+        ba.setStyleSheet(BTN_DANGER)
+        ba.clicked.connect(lambda: (action.__setitem__('value', 'all'), d.accept()))
+
+        h.addWidget(bc); h.addWidget(bd); h.addWidget(bf); h.addWidget(ba)
+        v.addLayout(h)
+
+        if d.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        if action['value'] == 'domain':
+            self._clear_hist_by_domain_dialog()
+            return
+        if action['value'] == 'dates':
+            self._clear_hist_by_dates_dialog()
+            return
+        if action['value'] != 'all':
+            return
+
+        clear_history()
+        self._refresh_hist()
+        Notif("Historial", "Historial de navegación limpiado.", self.centralWidget())
+
+    def _clear_hist_by_domain_dialog(self):
+        d = QDialog(self)
+        d.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
+        d.setStyleSheet(
+            """
+            QDialog{background:qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 rgba(14,20,36,0.98), stop:1 rgba(17,17,26,0.98));
+                    border:1px solid rgba(81,162,255,0.3); border-radius:14px;}
+            QLabel{color:#d7def5; background:transparent;}
+            """
+        )
+
+        v = QVBoxLayout(d)
+        v.setContentsMargins(20,20,20,20)
+        v.setSpacing(10)
+
+        v.addWidget(QLabel("<b style='color:#ffffff; font-size:15px;'>🌐 Borrar Historial por Dominio</b>"))
+        v.addWidget(QLabel("<span style='color:rgba(220,230,255,0.75); font-size:12px;'>Ejemplo: google.com o perplexity.ai</span>"))
+
+        inp = QLineEdit()
+        inp.setPlaceholderText("dominio.com")
+        inp.setStyleSheet("background:rgba(255,255,255,0.07); border:1px solid rgba(81,162,255,0.35); border-radius:9px; color:white; padding:9px;")
+
+        cur = self._cur()
+        if cur:
+            host = (cur.url().host() or '').lower()
+            if host.startswith('www.'):
+                host = host[4:]
+            inp.setText(host)
+
+        v.addWidget(inp)
+
+        h = QHBoxLayout()
+        h.setSpacing(8)
+        bc = QPushButton("Cancelar"); bc.setStyleSheet("QPushButton{background:rgba(255,255,255,0.07); border:1px solid rgba(255,255,255,0.12); border-radius:8px; color:#d5d9e8; padding:8px 12px; font-size:12px;} QPushButton:hover{background:rgba(255,255,255,0.14); color:white;}"); bc.clicked.connect(d.reject)
+        ba = QPushButton("Borrar dominio"); ba.setStyleSheet("QPushButton{background:rgba(255,95,87,0.14); border:1px solid rgba(255,95,87,0.36); border-radius:8px; color:#ffb3ae; padding:8px 12px; font-size:12px;} QPushButton:hover{background:rgba(255,95,87,0.26); color:white;}"); ba.clicked.connect(d.accept)
         h.addWidget(bc); h.addWidget(ba)
         v.addLayout(h)
-        if d.exec() == QDialog.DialogCode.Accepted:
-            clear_history()
-            self._refresh_hist()
-            Notif("Historial", "Historial de navegación limpiado.", self.centralWidget())
+
+        if d.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        removed = clear_history_by_domain(inp.text())
+        self._refresh_hist()
+        if removed > 0:
+            Notif("Historial", f"Registros eliminados del dominio: {removed}", self.centralWidget())
+        else:
+            Notif("Historial", "No se encontraron registros para ese dominio.", self.centralWidget())
+
+    def _clear_hist_by_dates_dialog(self):
+        d = QDialog(self)
+        d.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
+        d.setStyleSheet(
+            """
+            QDialog{background:qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 rgba(14,20,36,0.98), stop:1 rgba(17,17,26,0.98));
+                    border:1px solid rgba(155,89,182,0.35); border-radius:14px;}
+            QLabel{color:#d7def5; background:transparent;}
+            QDateEdit{background:rgba(255,255,255,0.07); border:1px solid rgba(155,89,182,0.4); border-radius:9px; color:white; padding:8px;}
+            QDateEdit::drop-down{subcontrol-origin:padding; subcontrol-position:top right; width:20px; border-left:1px solid rgba(255,255,255,0.15);}
+            QCalendarWidget QWidget{background:#141825; color:#d7def5;}
+            QCalendarWidget QToolButton{background:rgba(155,89,182,0.2); color:#e7d3ff; border:none; border-radius:6px; padding:4px 8px;}
+            QCalendarWidget QAbstractItemView:enabled{selection-background-color:rgba(155,89,182,0.35); selection-color:white;}
+            """
+        )
+
+        v = QVBoxLayout(d)
+        v.setContentsMargins(20,20,20,20)
+        v.setSpacing(10)
+
+        v.addWidget(QLabel("<b style='color:#ffffff; font-size:15px;'>📅 Borrar Historial por Fechas</b>"))
+        v.addWidget(QLabel("<span style='color:rgba(220,230,255,0.75); font-size:12px;'>Selecciona el rango a limpiar.</span>"))
+
+        start_lbl = QLabel("Desde")
+        start_lbl.setStyleSheet("color:#caa8f0; font-size:11px; font-weight:600;")
+        today = QDate.currentDate()
+        start_inp = QDateEdit()
+        start_inp.setCalendarPopup(True)
+        start_inp.setDisplayFormat("yyyy-MM-dd")
+        start_inp.setDate(today.addDays(-6))
+        start_inp.setMinimumHeight(34)
+
+        end_lbl = QLabel("Hasta")
+        end_lbl.setStyleSheet("color:#caa8f0; font-size:11px; font-weight:600;")
+        end_inp = QDateEdit()
+        end_inp.setCalendarPopup(True)
+        end_inp.setDisplayFormat("yyyy-MM-dd")
+        end_inp.setDate(today)
+        end_inp.setMinimumHeight(34)
+
+        v.addWidget(start_lbl)
+        v.addWidget(start_inp)
+        v.addWidget(end_lbl)
+        v.addWidget(end_inp)
+
+        h = QHBoxLayout()
+        h.setSpacing(8)
+        bc = QPushButton("Cancelar"); bc.setStyleSheet("QPushButton{background:rgba(255,255,255,0.07); border:1px solid rgba(255,255,255,0.12); border-radius:8px; color:#d5d9e8; padding:8px 12px; font-size:12px;} QPushButton:hover{background:rgba(255,255,255,0.14); color:white;}"); bc.clicked.connect(d.reject)
+        ba = QPushButton("Borrar rango"); ba.setStyleSheet("QPushButton{background:rgba(255,95,87,0.14); border:1px solid rgba(255,95,87,0.36); border-radius:8px; color:#ffb3ae; padding:8px 12px; font-size:12px;} QPushButton:hover{background:rgba(255,95,87,0.26); color:white;}"); ba.clicked.connect(d.accept)
+        h.addWidget(bc); h.addWidget(ba)
+        v.addLayout(h)
+
+        if d.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        start = start_inp.date().toString("yyyy-MM-dd")
+        end = end_inp.date().toString("yyyy-MM-dd")
+
+        if end < start:
+            Notif("Historial", "La fecha final no puede ser menor que la inicial.", self.centralWidget())
+            return
+
+        removed = clear_history_by_dates(start, end)
+        self._refresh_hist()
+        if removed > 0:
+            Notif("Historial", f"Registros eliminados por fecha: {removed}", self.centralWidget())
+        else:
+            Notif("Historial", "No se encontraron registros en ese rango.", self.centralWidget())
 
     def _clear_cache(self):
         d = QDialog(self)
         d.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
-        d.setStyleSheet("QDialog{background:#11111a; border:1px solid rgba(255,255,255,0.1); border-radius:12px;}")
-        v = QVBoxLayout(d); v.setContentsMargins(20,20,20,20)
-        v.addWidget(QLabel("<b style='color:white; font-size:14px;'>¿Limpiar caché y datos guardados?</b>"))
-        v.addWidget(QLabel("<span style='color:#aaa; font-size:12px;'>Se cerrarán las sesiones activas y se vaciarán<br>formularios y cookies.</span>"))
+        d.setStyleSheet(
+            """
+            QDialog{background:qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 rgba(14,20,36,0.98), stop:1 rgba(17,17,26,0.98));
+                    border:1px solid rgba(81,162,255,0.32); border-radius:14px;}
+            QLabel{background:transparent; color:#d7def5;}
+            """
+        )
+        v = QVBoxLayout(d); v.setContentsMargins(20,20,20,20); v.setSpacing(10)
+        v.addWidget(QLabel("<b style='color:#ffffff; font-size:15px;'>🧹 Limpiar Caché y Datos</b>"))
+        v.addWidget(QLabel("<span style='color:rgba(220,230,255,0.75); font-size:12px;'>Elige si quieres limpiar solo el sitio activo o todo el navegador.</span>"))
+
+        cur_host = ""
+        cur_view = self._cur()
+        if cur_view:
+            cur_host = (cur_view.url().host() or "").lower()
+        if cur_host:
+            host_chip = QLabel(f"<span style='color:#81a2ff; font-size:11px; font-weight:600;'>Sitio actual: {cur_host}</span>")
+            host_chip.setStyleSheet("QLabel{background:rgba(81,162,255,0.10); border:1px solid rgba(81,162,255,0.26); border-radius:8px; padding:6px 8px;}")
+            v.addWidget(host_chip)
+
+        action = {"value": "cancel"}
         h = QHBoxLayout()
-        bc = QPushButton("Cancelar"); bc.setStyleSheet(BTN_NAV); bc.clicked.connect(d.reject)
-        ba = QPushButton("Limpiar"); ba.setStyleSheet(BTN_NAV + "color:#ff5f57;"); ba.clicked.connect(d.accept)
-        h.addWidget(bc); h.addWidget(ba)
+        h.setSpacing(8)
+
+        bc = QPushButton("↩ Cancelar")
+        bc.setStyleSheet("QPushButton{background:rgba(108,117,125,0.30); border:1px solid rgba(198,204,214,0.45); border-radius:8px; color:#f0f4ff; padding:8px 12px; font-size:12px; font-weight:600;} QPushButton:hover{background:rgba(108,117,125,0.45); color:white;}")
+        bc.clicked.connect(lambda: (action.__setitem__("value", "cancel"), d.accept()))
+
+        bs = QPushButton("🌐 Limpiar sitio actual")
+        bs.setStyleSheet("QPushButton{background:rgba(25,118,210,0.40); border:1px solid rgba(127,190,255,0.70); border-radius:8px; color:#e6f4ff; padding:8px 12px; font-size:12px; font-weight:600;} QPushButton:hover{background:rgba(25,118,210,0.55); color:white;}")
+        bs.clicked.connect(lambda: (action.__setitem__("value", "site"), d.accept()))
+
+        ba = QPushButton("🧹 Limpiar todo")
+        ba.setStyleSheet("QPushButton{background:rgba(198,40,40,0.42); border:1px solid rgba(255,166,166,0.72); border-radius:8px; color:#ffe6e6; padding:8px 12px; font-size:12px; font-weight:700;} QPushButton:hover{background:rgba(198,40,40,0.58); color:white;}")
+        ba.clicked.connect(lambda: (action.__setitem__("value", "all"), d.accept()))
+
+        h.addWidget(bc); h.addWidget(bs); h.addWidget(ba)
         v.addLayout(h)
+
         if d.exec() == QDialog.DialogCode.Accepted:
+            if action["value"] == "site":
+                self._clear_current_site_data()
+                return
+            if action["value"] != "all":
+                return
             profile().clearHttpCache()
             profile().clearAllVisitedLinks()
             profile().cookieStore().deleteAllCookies()
             Notif("Caché y Datos", "Se ha vaciado el caché y formularios.", self.centralWidget())
+
+    def _clear_current_site_data(self):
+        view = self._cur()
+        if not view:
+            Notif("Caché y Datos", "No hay una pestaña activa para limpiar.", self.centralWidget())
+            return
+
+        qurl = view.url()
+        if qurl.scheme() not in ("http", "https"):
+            Notif("Caché y Datos", "El sitio actual no usa un dominio web válido.", self.centralWidget())
+            return
+
+        host = (qurl.host() or "").lower().lstrip('.')
+        if not host:
+            Notif("Caché y Datos", "No se pudo determinar el dominio actual.", self.centralWidget())
+            return
+
+        store = profile().cookieStore()
+        origin = QUrl(f"https://{host}")
+        deleted = {"count": 0}
+
+        def on_cookie(cookie):
+            domain = (cookie.domain() or "").lower().lstrip('.')
+            if not domain:
+                return
+
+            matches = (
+                host == domain or
+                host.endswith('.' + domain) or
+                domain.endswith('.' + host)
+            )
+            if not matches:
+                return
+
+            try:
+                store.deleteCookie(cookie, origin)
+            except TypeError:
+                store.deleteCookie(cookie)
+            deleted["count"] += 1
+
+        def finalize():
+            try:
+                store.cookieAdded.disconnect(on_cookie)
+            except Exception:
+                pass
+
+            # Limpia storage del origen actual dentro de la pestaña activa.
+            clear_js = """
+                (async () => {
+                    try { localStorage.clear(); } catch (e) {}
+                    try { sessionStorage.clear(); } catch (e) {}
+                    try {
+                        if (window.caches && caches.keys) {
+                            const keys = await caches.keys();
+                            await Promise.all(keys.map((k) => caches.delete(k)));
+                        }
+                    } catch (e) {}
+                    try {
+                        if (window.indexedDB && indexedDB.databases) {
+                            const dbs = await indexedDB.databases();
+                            for (const db of dbs || []) {
+                                if (db && db.name) indexedDB.deleteDatabase(db.name);
+                            }
+                        }
+                    } catch (e) {}
+                    return true;
+                })();
+            """
+            view.page().runJavaScript(clear_js)
+            view.reload()
+            Notif("Caché y Datos", f"Sitio limpiado: {host} (cookies: {deleted['count']}).", self.centralWidget())
+
+        store.cookieAdded.connect(on_cookie)
+        store.loadAllCookies()
+        QTimer.singleShot(600, finalize)
 
     # ── Pestañas ─────────────────────────────────────────────────────────────
     def new_tab(self, url=HOME):
