@@ -866,6 +866,22 @@ function renderVideos(videos) {
         // Determinar si este video es el que está sonando actualmente
         const isActive = index === currentIndex;
 
+        // Mostrar tamaño debajo del nombre
+        let sizeInfo = '';
+        if (typeof video.size === 'number' && !isNaN(video.size)) {
+            let sizeStr = '';
+            if (video.size >= 1024 * 1024 * 1024) {
+                sizeStr = (video.size / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
+            } else if (video.size >= 1024 * 1024) {
+                sizeStr = (video.size / (1024 * 1024)).toFixed(2) + ' MB';
+            } else if (video.size >= 1024) {
+                sizeStr = (video.size / 1024).toFixed(2) + ' KB';
+            } else {
+                sizeStr = video.size + ' B';
+            }
+            sizeInfo = `<div class="video-size" style="font-size:0.85em; color:var(--text-secondary); margin-top:2px;">${sizeStr}</div>`;
+        }
+
         return `
             <div class="video-card ${isActive ? 'active' : ''}" data-index="${index}" draggable="true">
                 <div class="video-thumbnail-container">
@@ -873,6 +889,7 @@ function renderVideos(videos) {
                 </div>
                 <div class="video-details">
                     <span class="video-name" title="Doble clic para renombrar">${video.name}</span>
+                    ${sizeInfo}
                     ${tagChips}
                     ${video.type ? `<span class="badge cloud-badge" style="background: var(--accent); color: white; font-size: 0.65rem; padding: 2px 6px; border-radius: 4px; margin-top: 4px; display: inline-block; width: fit-content;">☁️ ${video.type.toUpperCase()}</span>` : ''}
                 </div>
@@ -1496,7 +1513,7 @@ function playVideo(index) {
             externalPlayer.src = video.url;
             externalPlayer.style.display = 'block';
             externalPlayer.classList.remove('player-fading');
-            currentVideoTitle.textContent = video.name;
+            currentVideoTitle.textContent = formatVideoTitleWithSize(video);
             updatePlayerTagChips(video);
         } else {
             // Reproductor Nativo (Local o Direct Stream)
@@ -1504,7 +1521,7 @@ function playVideo(index) {
             externalPlayer.src = '';
             mainPlayer.style.display = 'block';
             mainPlayer.muted = settings.startMuted;
-            currentVideoTitle.textContent = video.name;
+            currentVideoTitle.textContent = formatVideoTitleWithSize(video);
             updatePlayerTagChips(video);
 
             setVideoSource(video.url);
@@ -1531,6 +1548,25 @@ function playVideo(index) {
                 startPlayback();
             }
         }
+// Formatea el nombre del video con el tamaño legible si está disponible
+function formatVideoTitleWithSize(video) {
+    let name = video.name || '';
+    if (typeof video.size === 'number' && !isNaN(video.size)) {
+        let size = video.size;
+        let sizeStr = '';
+        if (size >= 1024 * 1024 * 1024) {
+            sizeStr = (size / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
+        } else if (size >= 1024 * 1024) {
+            sizeStr = (size / (1024 * 1024)).toFixed(2) + ' MB';
+        } else if (size >= 1024) {
+            sizeStr = (size / 1024).toFixed(2) + ' KB';
+        } else {
+            sizeStr = size + ' B';
+        }
+        return `${name} (${sizeStr})`;
+    }
+    return name;
+}
 
         // showNotification(`Reproduciendo: ${video.name}`, 'info');
         if (playerLoader) playerLoader.style.display = 'none';
