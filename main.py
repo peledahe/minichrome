@@ -1609,6 +1609,18 @@ class AgendaBridge(QObject):
         # Cerramos solo la pestaña actual si es la agenda
         self.parent().main_win._close_tab_safe(self.parent().main_win._active)
 
+    @pyqtSlot()
+    def hide_browser_bar(self):
+        mw = self.parent().main_win
+        if mw and mw._bar_open:
+            mw._hide_bar()
+
+    @pyqtSlot()
+    def show_browser_bar(self):
+        mw = self.parent().main_win
+        if mw and not mw._bar_open:
+            mw._show_bar()
+
 
 class PasswordBridge(QObject):
     updated = pyqtSignal()
@@ -2433,17 +2445,18 @@ class Minichrome(QMainWindow):
         """)
         self._go.clicked.connect(self._go_clicked)
         
-        self._fav = self._nb("☆","Guardar favorito")
+        self._fav = self._nb("☆", "Guardar favorito")
         self._fav.clicked.connect(self._save_fav)
 
-        self._shot = QPushButton("📷")
-        self._shot.setFixedSize(14, 14)
+        self._shot = QPushButton("◉")
+        self._shot.setFixedSize(20, 20)
         self._shot.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         self._shot.setToolTip("Capturar pantalla (Ctrl+Shift+S)")
+        self._shot.setFont(QFont("DejaVu Sans", 10, QFont.Weight.DemiBold))
         self._shot.setStyleSheet("""
-            QPushButton{background:rgba(0,0,0,0.15);border:none;
-              border-radius:7px;font-size:0px;}
-            QPushButton:hover{background:#6c5ce7;font-size:8px;color:rgba(0,0,0,.7);}
+            QPushButton{background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.1);
+                border-radius:6px; color:rgba(255,255,255,0.8); padding:0;}
+            QPushButton:hover{background:#6c5ce7; border-color:#8f7bff; color:white;}
         """)
         self._shot.clicked.connect(self._capture_screenshot)
 
@@ -2588,23 +2601,33 @@ class Minichrome(QMainWindow):
     # ── Controles de ventana ──────────────────────────────────────────────────
     def _build_win_ctrl(self, parent):
         w = QWidget(parent)
-        h = QHBoxLayout(w); h.setContentsMargins(6,6,6,6); h.setSpacing(6)
-        w.setStyleSheet("background:transparent;")
+        h = QHBoxLayout(w)
+        h.setContentsMargins(6, 4, 6, 4)
+        h.setSpacing(4)
+        h.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+        w.setStyleSheet("""
+            background:rgba(0,0,0,0.42);
+            border:1px solid rgba(255,255,255,0.1);
+            border-radius:8px;
+        """)
 
-        specs = [("◷","#3498db",self._toggle_hist_panel, "Historial de navegación"),
-                 ("★","#9b59b6",self._toggle_fav_panel,   "Favoritos guardados"),
-                 ("−","#febc2e",self.showMinimized,        "Minimizar ventana"),
-                 ("□","#28c840",self._toggle_max,          "Maximizar / Restaurar"),
-                 ("×","#ff5f57",self.close,                "Cerrar ventana")]
-        for sym,col,fn,tip in specs:
+        specs = [
+            ("◷", "#3498db", self._toggle_hist_panel, "Historial de navegación"),
+            ("★", "#9b59b6", self._toggle_fav_panel, "Favoritos guardados"),
+            ("—", "#febc2e", self.showMinimized, "Minimizar ventana"),
+            ("▢", "#28c840", self._toggle_max, "Maximizar / Restaurar"),
+            ("✕", "#ff5f57", self.close, "Cerrar ventana"),
+        ]
+        for sym, col, fn, tip in specs:
             b = QPushButton(sym)
-            b.setFixedSize(14,14)
+            b.setFixedSize(20, 20)
             b.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
             b.setToolTip(tip)
+            b.setFont(QFont("DejaVu Sans", 10, QFont.Weight.DemiBold))
             b.setStyleSheet(f"""
-                QPushButton{{background:rgba(0,0,0,0.15);border:none;
-                  border-radius:7px;font-size:0px;}}
-                QPushButton:hover{{background:{col};font-size:8px;color:rgba(0,0,0,.7);}}
+                QPushButton{{background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.1);
+                    border-radius:6px; color:rgba(255,255,255,0.8); padding:0;}}
+                QPushButton:hover{{background:{col}; border-color:{col}; color:white;}}
             """)
             b.clicked.connect(fn)
             h.addWidget(b)

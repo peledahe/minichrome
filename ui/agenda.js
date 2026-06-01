@@ -817,6 +817,10 @@ async function activateTab(tabName) {
     const target = isTabVisible(tabName) ? tabName : 'agenda';
     localStorage.setItem('lastAgendaTab', target);
 
+    if (target === 'passwords' && py?.hide_browser_bar) {
+        py.hide_browser_bar();
+    }
+
     document.querySelectorAll('.ag-tab').forEach((t) => {
         t.classList.toggle('active', t.dataset.tab === target);
     });

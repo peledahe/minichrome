@@ -1,3 +1,4 @@
+let pyBridge = null;
 let pwBridge = null;
 let allPasswords = [];
 let currentEditId = null;
@@ -47,8 +48,16 @@ function updateTypeUi(type) {
     });
 }
 
+function setBrowserBarVisible(visible) {
+    if (!pyBridge) return;
+    if (!visible && typeof pyBridge.hide_browser_bar === 'function') {
+        pyBridge.hide_browser_bar();
+    }
+}
+
 // Inicializar QWebChannel
 new QWebChannel(qt.webChannelTransport, (channel) => {
+    pyBridge = channel.objects.py;
     pwBridge = channel.objects.pw;
     if (pwBridge && pwBridge.updated && typeof pwBridge.updated.connect === 'function') {
         pwBridge.updated.connect(() => {
@@ -58,6 +67,7 @@ new QWebChannel(qt.webChannelTransport, (channel) => {
     wireEvents();
     loadAutoSavePolicy();
     loadPasswords();
+    setBrowserBarVisible(false);
 });
 
 window.addEventListener('pageshow', () => {
