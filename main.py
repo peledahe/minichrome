@@ -65,7 +65,7 @@ def _db():
     c.execute("CREATE TABLE IF NOT EXISTS income(id INTEGER PRIMARY KEY, text TEXT, value REAL, currency TEXT, dueDate TEXT, received INTEGER DEFAULT 0)")
     c.execute("CREATE TABLE IF NOT EXISTS kanban_cols(id INTEGER PRIMARY KEY, title TEXT, pos INTEGER)")
     c.execute("CREATE TABLE IF NOT EXISTS kanban_cards(id INTEGER PRIMARY KEY, col_id INTEGER, text TEXT, pos INTEGER)")
-    c.execute("CREATE TABLE IF NOT EXISTS notes(id INTEGER PRIMARY KEY, content TEXT DEFAULT '', color TEXT DEFAULT 'yellow', x INTEGER DEFAULT 20, y INTEGER DEFAULT 20, z_index INTEGER DEFAULT 1, ts DATETIME DEFAULT CURRENT_TIMESTAMP)")
+    c.execute("CREATE TABLE IF NOT EXISTS notes(id INTEGER PRIMARY KEY, content TEXT DEFAULT '', color TEXT DEFAULT 'yellow', x INTEGER DEFAULT 20, y INTEGER DEFAULT 20, width INTEGER DEFAULT 220, height INTEGER DEFAULT 170, z_index INTEGER DEFAULT 1, ts DATETIME DEFAULT CURRENT_TIMESTAMP)")
     
     # Tablas de VideoPlayer
     c.execute("CREATE TABLE IF NOT EXISTS video_tags(url TEXT PRIMARY KEY, data TEXT)")
@@ -81,6 +81,10 @@ def _db():
         c.execute("ALTER TABLE notes ADD COLUMN x INTEGER DEFAULT 20")
     if 'y' not in notes_cols:
         c.execute("ALTER TABLE notes ADD COLUMN y INTEGER DEFAULT 20")
+    if 'width' not in notes_cols:
+        c.execute("ALTER TABLE notes ADD COLUMN width INTEGER DEFAULT 220")
+    if 'height' not in notes_cols:
+        c.execute("ALTER TABLE notes ADD COLUMN height INTEGER DEFAULT 170")
     if 'z_index' not in notes_cols:
         c.execute("ALTER TABLE notes ADD COLUMN z_index INTEGER DEFAULT 1")
 
@@ -1502,8 +1506,8 @@ class AgendaBridge(QObject):
 
     @pyqtSlot(result=list)
     def get_notes(self):
-        c = _db(); res = c.execute("SELECT id, content, color, x, y, z_index FROM notes ORDER BY z_index ASC").fetchall(); c.close()
-        return [{"id":r[0],"content":r[1] or '',"color":r[2] or 'yellow',"x":r[3] or 20,"y":r[4] or 20,"zIndex":r[5] or 1} for r in res]
+        c = _db(); res = c.execute("SELECT id, content, color, x, y, width, height, z_index FROM notes ORDER BY z_index ASC").fetchall(); c.close()
+        return [{"id":r[0],"content":r[1] or '',"color":r[2] or 'yellow',"x":r[3] if r[3] is not None else 20,"y":r[4] if r[4] is not None else 20,"width":r[5] if r[5] is not None else 220,"height":r[6] if r[6] is not None else 170,"zIndex":r[7] or 1} for r in res]
 
     @pyqtSlot(str, int, int, int, result=int)
     def add_note(self, color, x, y, z_index):
@@ -1525,6 +1529,12 @@ class AgendaBridge(QObject):
     @pyqtSlot(int, int, int)
     def update_note_pos(self, nid, x, y):
         c = _db(); c.execute("UPDATE notes SET x=?, y=? WHERE id=?", (x, y, nid)); c.commit(); c.close()
+
+    @pyqtSlot(int, int, int)
+    def update_note_size(self, nid, width, height):
+        width = max(220, int(width or 220))
+        height = max(170, int(height or 170))
+        c = _db(); c.execute("UPDATE notes SET width=?, height=? WHERE id=?", (width, height, nid)); c.commit(); c.close()
 
     @pyqtSlot(int, int)
     def update_note_zindex(self, nid, z_index):

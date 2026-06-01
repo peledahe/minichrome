@@ -1196,12 +1196,15 @@
         .sticky-note {
             position: absolute;
             width: 220px;
+            min-width: 220px;
             min-height: 170px;
             border-radius: 4px 4px 4px 4px;
             box-shadow: 3px 4px 14px rgba(0,0,0,0.45), 0 1px 3px rgba(0,0,0,0.3);
             display: flex;
             flex-direction: column;
             user-select: none;
+            overflow: hidden;
+            resize: both;
             transition: box-shadow 0.15s;
         }
         .sticky-note:hover {
@@ -1224,6 +1227,7 @@
             border-width: 0 0 18px 18px;
             border-color: transparent transparent rgba(0,0,0,0.18) transparent;
             border-radius: 0 0 4px 0;
+            pointer-events: none;
         }
 
         .note-header {
@@ -1280,7 +1284,8 @@
         }
         .note-body textarea {
             width: 100%;
-            min-height: 130px;
+            min-height: 0;
+            height: 100%;
             background: transparent;
             border: none;
             outline: none;

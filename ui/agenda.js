@@ -1575,6 +1575,10 @@ const NOTE_COLORS = {
     white:  { bg: '#f0f0f5', header: '#dde0e8' },
 };
 
+const NOTE_MIN_WIDTH = 220;
+const NOTE_MIN_HEIGHT = 170;
+const noteSizeSaveTimers = new Map();
+
 let notesData = [];
 let notesLoaded = false;
 
@@ -1592,6 +1596,24 @@ async function fetchNotes() {
 function updateNotesCount() {
     const badge = document.getElementById('notes-total');
     if (badge) badge.textContent = notesData.length;
+}
+
+function schedulePersistNoteSize(noteId, width, height) {
+    if (!py || typeof py.update_note_size !== 'function') return;
+
+    const w = Math.max(NOTE_MIN_WIDTH, Math.round(Number(width) || NOTE_MIN_WIDTH));
+    const h = Math.max(NOTE_MIN_HEIGHT, Math.round(Number(height) || NOTE_MIN_HEIGHT));
+    const key = String(noteId);
+
+    const prevTimer = noteSizeSaveTimers.get(key);
+    if (prevTimer) clearTimeout(prevTimer);
+
+    const timer = setTimeout(() => {
+        noteSizeSaveTimers.delete(key);
+        py.update_note_size(Number(noteId), w, h).catch(() => {});
+    }, 180);
+
+    noteSizeSaveTimers.set(key, timer);
 }
 
 function autoArrangeNotes() {
@@ -1676,7 +1698,12 @@ function buildNote(note) {
     div.className = 'sticky-note';
     div.dataset.id = note.id;
     div.dataset.color = note.color || 'yellow';
-    div.style.cssText = `left:${note.x || 20}px; top:${note.y || 20}px; z-index:${note.zIndex || 1};`;
+    const left = note.x ?? 20;
+    const top = note.y ?? 20;
+    const width = Math.max(NOTE_MIN_WIDTH, Number(note.width ?? NOTE_MIN_WIDTH));
+    const height = Math.max(NOTE_MIN_HEIGHT, Number(note.height ?? NOTE_MIN_HEIGHT));
+    const zIndex = note.zIndex ?? 1;
+    div.style.cssText = `left:${left}px; top:${top}px; width:${width}px; height:${height}px; z-index:${zIndex};`;
 
     div.innerHTML = `
         <div class="note-header">
@@ -1700,11 +1727,25 @@ function buildNote(note) {
     // Eliminar
     div.querySelector('.note-delete').addEventListener('click', async (e) => {
         e.stopPropagation();
+        if (div._resizeObserver) {
+            div._resizeObserver.disconnect();
+            div._resizeObserver = null;
+        }
+        const timerKey = String(note.id);
+        const pending = noteSizeSaveTimers.get(timerKey);
+        if (pending) {
+            clearTimeout(pending);
+            noteSizeSaveTimers.delete(timerKey);
+        }
         notesData = notesData.filter(n => n.id !== note.id);
         div.style.transition = 'opacity 0.2s, transform 0.2s';
         div.style.opacity = '0';
         div.style.transform = 'scale(0.85)';
-        setTimeout(() => { div.remove(); autoArrangeNotes(); updateNotesCount(); }, 200);
+        setTimeout(() => {
+            div.remove();
+            updateCanvasSize();
+            updateNotesCount();
+        }, 200);
         if (notesData.length === 0) {
             const hint = document.getElementById('notes-hint');
             if (hint) hint.style.display = '';
@@ -1765,6 +1806,24 @@ function buildNote(note) {
     // Evitar que clicks en el textarea inicien drag
     textarea.addEventListener('mousedown', e => e.stopPropagation());
 
+    if (window.ResizeObserver) {
+        const resizeObserver = new ResizeObserver(() => {
+            const nextW = Math.max(NOTE_MIN_WIDTH, Math.round(div.offsetWidth || NOTE_MIN_WIDTH));
+            const nextH = Math.max(NOTE_MIN_HEIGHT, Math.round(div.offsetHeight || NOTE_MIN_HEIGHT));
+            note.width = nextW;
+            note.height = nextH;
+            const idx = notesData.findIndex(n => n.id === note.id);
+            if (idx !== -1) {
+                notesData[idx].width = nextW;
+                notesData[idx].height = nextH;
+            }
+            schedulePersistNoteSize(note.id, nextW, nextH);
+            updateCanvasSize();
+        });
+        resizeObserver.observe(div);
+        div._resizeObserver = resizeObserver;
+    }
+
     return div;
 }
 
@@ -1817,11 +1876,15 @@ async function addNote(x, y) {
     const offset = (notesData.length % 10) * 22;
     const nx = x !== undefined ? x : 20 + offset;
     const ny = y !== undefined ? y : 20 + offset;
+    const nw = NOTE_MIN_WIDTH;
+    const nh = NOTE_MIN_HEIGHT;
     const maxZ = notesData.length ? Math.max(...notesData.map(n => n.zIndex || 1)) + 1 : 1;
     try {
         const nid = await py.add_note('yellow', nx, ny, maxZ);
-        const note = { id: nid, content: '', color: 'yellow', x: nx, y: ny, zIndex: maxZ };
+        const note = { id: nid, content: '', color: 'yellow', x: nx, y: ny, width: nw, height: nh, zIndex: maxZ };
         notesData.push(note);
+        py.update_note_pos(nid, nx, ny).catch(() => {});
+        schedulePersistNoteSize(nid, nw, nh);
         const canvas = document.getElementById('notes-canvas');
         const hint = document.getElementById('notes-hint');
         if (hint) hint.style.display = 'none';
@@ -1833,7 +1896,7 @@ async function addNote(x, y) {
             noteEl.style.transition = 'opacity 0.2s, transform 0.2s';
             noteEl.style.opacity = '1';
             noteEl.style.transform = 'scale(1)';
-            autoArrangeNotes();
+            updateCanvasSize();
             updateNotesCount();
         });
         setTimeout(() => {
