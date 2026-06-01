@@ -1742,6 +1742,7 @@
         }
         .pw-avatar.web  { background: rgba(9,132,227,0.2);  color: #74b9ff; }
         .pw-avatar.app  { background: rgba(108,92,231,0.2); color: #a29bfe; }
+        .pw-avatar.db   { background: rgba(0,206,201,0.2); color: #81ecec; }
 
         .pw-card-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
         .pw-card-name-row {
@@ -1766,6 +1767,7 @@
         }
         .pw-type-badge.web { background: rgba(9,132,227,0.2); color: #74b9ff; }
         .pw-type-badge.app { background: rgba(108,92,231,0.2); color: #a29bfe; }
+        .pw-type-badge.db { background: rgba(0,206,201,0.2); color: #81ecec; }
 
         .pw-card-url {
             font-size: 0.75rem;
@@ -2060,7 +2062,7 @@
             <button class="ag-tab" data-tab="income">Ingresos</button>
             <button class="ag-tab" data-tab="kanban">Kanban</button>
             <button class="ag-tab" data-tab="notes">Notas</button>
-            <button class="ag-tab" data-tab="passwords">Llaves</button>
+            <button class="ag-tab" data-tab="passwords">Claves</button>
         </div>
 
         <div style="flex:1; -webkit-app-region: drag; height: 100%;"></div>
@@ -2464,7 +2466,7 @@
                     <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1s3.1 1.39 3.1 3.1v2z"/></svg>
                     Contraseñas
                 </h1>
-                <p>Almacén local de credenciales para sitios web y aplicaciones</p>
+                <p>Almacén local de credenciales para sitios web, aplicaciones y bases de datos</p>
             </div>
             <div class="pw-toolbar">
                 <input type="text" id="pw-search" class="ag-input" placeholder="🔍 Buscar por nombre o usuario...">
@@ -2477,6 +2479,10 @@
                     <button class="pw-filter" data-filter="app">
                         <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><path d="M21 2H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h7l-2 3v1h8v-1l-2-3h7c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 12H3V4h18v10z"/></svg>
                         Aplicaciones
+                    </button>
+                    <button class="pw-filter" data-filter="db">
+                        <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><path d="M12 2C7.58 2 4 3.79 4 6v12c0 2.21 3.58 4 8 4s8-1.79 8-4V6c0-2.21-3.58-4-8-4zm0 2c3.31 0 6 .9 6 2s-2.69 2-6 2-6-.9-6-2 2.69-2 6-2zm0 16c-3.31 0-6-.9-6-2v-2.27c1.36.8 3.53 1.27 6 1.27s4.64-.47 6-1.27V18c0 1.1-2.69 2-6 2zm0-5c-3.31 0-6-.9-6-2v-2.27c1.36.8 3.53 1.27 6 1.27s4.64-.47 6-1.27V13c0 1.1-2.69 2-6 2z"/></svg>
+                        Bases de datos
                     </button>
                 </div>
                 <div class="pw-autosave-wrap" title="Solo aplica al guardado detectado automaticamente al iniciar sesion en sitios web">
@@ -2636,17 +2642,41 @@
                     <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M21 2H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h7l-2 3v1h8v-1l-2-3h7c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 12H3V4h18v10z"/></svg>
                     Aplicación
                 </button>
+                <button class="pw-type-btn" data-type="db">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M12 2C7.58 2 4 3.79 4 6v12c0 2.21 3.58 4 8 4s8-1.79 8-4V6c0-2.21-3.58-4-8-4zm0 2c3.31 0 6 .9 6 2s-2.69 2-6 2-6-.9-6-2 2.69-2 6-2zm0 16c-3.31 0-6-.9-6-2v-2.27c1.36.8 3.53 1.27 6 1.27s4.64-.47 6-1.27V18c0 1.1-2.69 2-6 2zm0-5c-3.31 0-6-.9-6-2v-2.27c1.36.8 3.53 1.27 6 1.27s4.64-.47 6-1.27V13c0 1.1-2.69 2-6 2z"/></svg>
+                    Base de datos
+                </button>
             </div>
             <div>
-                <label class="pw-modal-label">Nombre *</label>
+                <label class="pw-modal-label" id="pw-name-label">Nombre *</label>
                 <input type="text" id="pw-name" class="ag-input" placeholder="ej: Google, Netflix, Banco…" style="width:100%;">
             </div>
             <div id="pw-url-row">
-                <label class="pw-modal-label">URL</label>
+                <label class="pw-modal-label" id="pw-url-label">URL</label>
                 <input type="text" id="pw-url" class="ag-input" placeholder="https://..." style="width:100%;">
             </div>
+            <div id="pw-db-port-row" style="display:none;">
+                <label class="pw-modal-label" id="pw-db-port-label">Puerto</label>
+                <input type="text" id="pw-db-port" class="ag-input" placeholder="3306" style="width:100%;">
+            </div>
+            <div id="pw-db-name-row" style="display:none;">
+                <label class="pw-modal-label" id="pw-db-name-label">Base de datos</label>
+                <input type="text" id="pw-db-name" class="ag-input" placeholder="fundascout" style="width:100%;">
+            </div>
+            <div id="pw-db-type-row" style="display:none;">
+                <label class="pw-modal-label" id="pw-db-type-label">Tipo de base de datos</label>
+                <select id="pw-db-type" class="ag-input" style="width:100%;">
+                    <option value="mysql">MySQL</option>
+                    <option value="postgresql">PostgreSQL</option>
+                    <option value="mariadb">MariaDB</option>
+                    <option value="sqlite">SQLite</option>
+                    <option value="sqlserver">SQL Server</option>
+                    <option value="oracle">Oracle</option>
+                    <option value="other">Otro</option>
+                </select>
+            </div>
             <div>
-                <label class="pw-modal-label">Usuario / Correo *</label>
+                <label class="pw-modal-label" id="pw-username-label">Usuario / Correo *</label>
                 <input type="text" id="pw-username" class="ag-input" placeholder="usuario@ejemplo.com" style="width:100%;" autocomplete="off">
             </div>
             <div>

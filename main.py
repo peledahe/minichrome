@@ -1726,8 +1726,10 @@ class PasswordBridge(QObject):
 
     def _normalize_type(self, site, pwd_type):
         t = (pwd_type or '').strip().lower()
-        if t in ('web', 'app'):
+        if t in ('web', 'app', 'db'):
             return t
+        if t in ('database', 'base de datos', 'basedatos', 'base_de_datos'):
+            return 'db'
         return 'web' if '.' in (site or '') else 'app'
 
     def _find_existing_id(self, c, site, user, exclude_id=None):

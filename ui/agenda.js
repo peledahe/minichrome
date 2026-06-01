@@ -56,6 +56,28 @@ const state = {
     kbModalStatus: 'pending'
 };
 
+const DB_LARAVEL_TEMPLATE = {
+    site: 'Fundascout DB (Laravel)',
+    url: 'https://test.merke.net/fundascout/',
+    dbPort: '3306',
+    dbName: 'fundascout',
+    dbType: 'mysql',
+    username: 'perry',
+    password: 'password',
+    notes: `APP_NAME=Laravel
+APP_ENV=production
+APP_URL=https://test.merke.net/fundascout/
+
+DB_CONNECTION=mysql
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_DATABASE=fundascout
+DB_USERNAME=perry
+DB_PASSWORD=password`
+};
+
+const DB_NOTE_KEYS = ['DB_CONNECTION', 'DB_PORT', 'DB_DATABASE'];
+
 const MODULE_META = {
     shopping: { cfgKey: 'shoppingEnabled', tab: 'shopping' },
     income: { cfgKey: 'incomeEnabled', tab: 'income' },
@@ -377,8 +399,7 @@ function bindPasswordEvents() {
 
     document.querySelectorAll('.pw-type-btn').forEach((btn) => {
         btn.addEventListener('click', () => {
-            document.querySelectorAll('.pw-type-btn').forEach((b) => b.classList.remove('active'));
-            btn.classList.add('active');
+            setActivePwType(btn.dataset.type || 'web', true);
         });
     });
 
@@ -396,6 +417,135 @@ function bindPasswordEvents() {
                     : 'Autoguardado: preguntar';
             notify(`${label}. Manual siempre permitido`, 'success');
         });
+    }
+}
+
+function normalizePwType(type, site = '', notes = '') {
+    const raw = String(type || '').trim().toLowerCase();
+    if (raw === 'web' || raw === 'app' || raw === 'db') return raw;
+    if (['database', 'base de datos', 'basedatos', 'base_de_datos'].includes(raw)) return 'db';
+    const hint = `${site || ''}\n${notes || ''}`.toLowerCase();
+    if (/(db_|database|mysql|postgres|sqlserver|sqlite|mariadb)/.test(hint)) return 'db';
+    return String(site || '').includes('.') ? 'web' : 'app';
+}
+
+function getPwTypeLabel(type) {
+    if (type === 'web') return 'WEB';
+    if (type === 'app') return 'APP';
+    return 'DB';
+}
+
+function getActivePwType() {
+    return normalizePwType(document.querySelector('.pw-type-btn.active')?.dataset.type || 'web');
+}
+
+function canPrefillDbTemplate() {
+    if (state.pwEditId) return false;
+    const name = (document.getElementById('pw-name')?.value || '').trim();
+    const url = (document.getElementById('pw-url')?.value || '').trim();
+    const user = (document.getElementById('pw-username')?.value || '').trim();
+    const pass = (document.getElementById('pw-password')?.value || '').trim();
+    const notes = (document.getElementById('pw-notes')?.value || '').trim();
+    const dbPort = (document.getElementById('pw-db-port')?.value || '').trim();
+    const dbName = (document.getElementById('pw-db-name')?.value || '').trim();
+    const dbType = (document.getElementById('pw-db-type')?.value || '').trim();
+    return !name && !url && !user && !pass && !notes && !dbPort && !dbName && !dbType;
+}
+
+function parseDbFieldsFromNotes(notes) {
+    const raw = String(notes || '');
+    const pick = (key) => {
+        const m = raw.match(new RegExp(`^${key}\\s*=\\s*(.+)$`, 'mi'));
+        return m ? m[1].trim() : '';
+    };
+    const dbType = pick('DB_CONNECTION').toLowerCase();
+    return {
+        dbPort: pick('DB_PORT'),
+        dbName: pick('DB_DATABASE'),
+        dbType: dbType || ''
+    };
+}
+
+function mergeDbFieldsIntoNotes(notes, dbFields) {
+    const raw = String(notes || '');
+    const lines = raw ? raw.split(/\r?\n/) : [];
+    const filtered = lines.filter((line) => !DB_NOTE_KEYS.some((key) => new RegExp(`^${key}\\s*=`, 'i').test(line.trim())));
+
+    const clean = filtered.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+    const out = [];
+    if (clean) out.push(clean);
+    if (dbFields.dbType) out.push(`DB_CONNECTION=${dbFields.dbType}`);
+    if (dbFields.dbPort) out.push(`DB_PORT=${dbFields.dbPort}`);
+    if (dbFields.dbName) out.push(`DB_DATABASE=${dbFields.dbName}`);
+    return out.join('\n').trim();
+}
+
+function fillDbFields(values) {
+    const dbPort = document.getElementById('pw-db-port');
+    const dbName = document.getElementById('pw-db-name');
+    const dbType = document.getElementById('pw-db-type');
+    if (dbPort) dbPort.value = values.dbPort || '';
+    if (dbName) dbName.value = values.dbName || '';
+    if (dbType) {
+        const nextType = (values.dbType || '').toLowerCase();
+        const exists = Array.from(dbType.options || []).some((opt) => opt.value === nextType);
+        dbType.value = exists ? nextType : 'other';
+    }
+}
+
+function maybePrefillDbTemplate() {
+    if (!canPrefillDbTemplate()) return;
+    const name = document.getElementById('pw-name');
+    const url = document.getElementById('pw-url');
+    const user = document.getElementById('pw-username');
+    const pass = document.getElementById('pw-password');
+    const notes = document.getElementById('pw-notes');
+
+    if (name) name.value = DB_LARAVEL_TEMPLATE.site;
+    if (url) url.value = DB_LARAVEL_TEMPLATE.url;
+    if (user) user.value = DB_LARAVEL_TEMPLATE.username;
+    if (pass) pass.value = DB_LARAVEL_TEMPLATE.password;
+    if (notes) notes.value = DB_LARAVEL_TEMPLATE.notes;
+    fillDbFields(DB_LARAVEL_TEMPLATE);
+}
+
+function setActivePwType(rawType, allowDbPrefill = false) {
+    const type = normalizePwType(rawType);
+    document.querySelectorAll('.pw-type-btn').forEach((btn) => {
+        btn.classList.toggle('active', btn.dataset.type === type);
+    });
+
+    const nameLabel = document.getElementById('pw-name-label');
+    const userLabel = document.getElementById('pw-username-label');
+    const nameInput = document.getElementById('pw-name');
+    const userInput = document.getElementById('pw-username');
+    const urlRow = document.getElementById('pw-url-row');
+    const dbPortRow = document.getElementById('pw-db-port-row');
+    const dbNameRow = document.getElementById('pw-db-name-row');
+    const dbTypeRow = document.getElementById('pw-db-type-row');
+
+    if (nameLabel) {
+        nameLabel.textContent = type === 'web' ? 'Nombre *' : type === 'app' ? 'Aplicación *' : 'Servidor / Proyecto *';
+    }
+    if (userLabel) {
+        userLabel.textContent = type === 'db' ? 'Usuario DB *' : 'Usuario / Correo *';
+    }
+    if (nameInput && !nameInput.value) {
+        nameInput.placeholder = type === 'web' ? 'ej: Google, Netflix, Banco…' : type === 'app' ? 'ej: Steam, Photoshop…' : 'ej: Fundascout Producción';
+    }
+    if (userInput && !userInput.value) {
+        userInput.placeholder = type === 'db' ? 'ej: root, perry' : 'usuario@ejemplo.com';
+    }
+
+    if (urlRow) {
+        urlRow.style.display = (type === 'web' || type === 'db') ? '' : 'none';
+    }
+    if (dbPortRow) dbPortRow.style.display = type === 'db' ? '' : 'none';
+    if (dbNameRow) dbNameRow.style.display = type === 'db' ? '' : 'none';
+    if (dbTypeRow) dbTypeRow.style.display = type === 'db' ? '' : 'none';
+
+    if (type === 'db' && allowDbPrefill) {
+        maybePrefillDbTemplate();
     }
 }
 
@@ -2426,7 +2576,7 @@ async function pwLoad() {
         ]);
         state.passwords = (rows || []).map((p) => ({
             ...p,
-            type: p.type || ((p.site || '').includes('.') ? 'web' : 'app'),
+            type: normalizePwType(p.type, p.site, p.notes),
             url: p.url || '',
             notes: p.notes || ''
         }));
@@ -2447,8 +2597,9 @@ function renderPasswords() {
     if (!list) return;
 
     const filtered = state.passwords.filter((p) => {
+        const pType = normalizePwType(p.type, p.site, p.notes);
         const termOk = !state.pwSearch || (p.site || '').toLowerCase().includes(state.pwSearch) || (p.username || '').toLowerCase().includes(state.pwSearch);
-        const filterOk = state.pwFilter === 'all' ? true : p.type === state.pwFilter;
+        const filterOk = state.pwFilter === 'all' ? true : pType === state.pwFilter;
         return termOk && filterOk;
     });
 
@@ -2458,6 +2609,7 @@ function renderPasswords() {
     }
 
     list.innerHTML = filtered.map((p) => {
+        const safeType = normalizePwType(p.type, p.site, p.notes);
         const visible = state.pwShowSet.has(p.id);
         const passView = visible ? escapeHtml(p.password || '') : '••••••••';
         return `
@@ -2465,9 +2617,9 @@ function renderPasswords() {
             <div class="pw-card-info">
                 <div class="pw-card-name-row">
                     <div class="pw-card-name">${escapeHtml(p.site || '')}</div>
-                    <span class="pw-type-badge ${p.type}">${p.type === 'web' ? 'WEB' : 'APP'}</span>
+                    <span class="pw-type-badge ${safeType}">${getPwTypeLabel(safeType)}</span>
                 </div>
-                ${p.type === 'web' && p.url ? `<div class="pw-card-url">${escapeHtml(p.url)}</div>` : ''}
+                ${(safeType === 'web' || safeType === 'db') && p.url ? `<div class="pw-card-url">${escapeHtml(p.url)}</div>` : ''}
                 <div class="pw-field-row">
                     <span class="pw-field-label">Usuario</span>
                     <span class="pw-field-value">${escapeHtml(p.username || '')}</span>
@@ -2522,11 +2674,9 @@ function openPasswordModal(item) {
     const username = document.getElementById('pw-username');
     const password = document.getElementById('pw-password');
     const notes = document.getElementById('pw-notes');
+    const parsedDb = parseDbFieldsFromNotes(item?.notes || '');
 
-    document.querySelectorAll('.pw-type-btn').forEach((b) => b.classList.remove('active'));
-    const defaultType = item?.type || 'web';
-    const activeTypeBtn = document.querySelector(`.pw-type-btn[data-type="${defaultType}"]`);
-    if (activeTypeBtn) activeTypeBtn.classList.add('active');
+    const defaultType = normalizePwType(item?.type || 'web', item?.site || '', item?.notes || '');
 
     if (title) title.textContent = item ? 'Editar contraseña' : 'Nueva contraseña';
     if (name) name.value = item?.site || '';
@@ -2534,6 +2684,9 @@ function openPasswordModal(item) {
     if (username) username.value = item?.username || '';
     if (password) password.value = item?.password || '';
     if (notes) notes.value = item?.notes || '';
+    fillDbFields(parsedDb);
+
+    setActivePwType(defaultType, !item);
 
     document.getElementById('pw-modal')?.classList.add('active');
 }
@@ -2547,12 +2700,23 @@ async function savePassword() {
     const url = (document.getElementById('pw-url')?.value || '').trim();
     const username = (document.getElementById('pw-username')?.value || '').trim();
     const password = (document.getElementById('pw-password')?.value || '').trim();
-    const notes = (document.getElementById('pw-notes')?.value || '').trim();
-    const type = document.querySelector('.pw-type-btn.active')?.dataset.type || 'web';
+    let notes = (document.getElementById('pw-notes')?.value || '').trim();
+    const type = getActivePwType();
+    const dbPort = (document.getElementById('pw-db-port')?.value || '').trim();
+    const dbName = (document.getElementById('pw-db-name')?.value || '').trim();
+    const dbType = (document.getElementById('pw-db-type')?.value || '').trim().toLowerCase();
 
     if (!site || !username || !password) {
         notify('Completa los campos obligatorios', 'info');
         return;
+    }
+
+    if (type === 'db') {
+        notes = mergeDbFieldsIntoNotes(notes, {
+            dbPort,
+            dbName,
+            dbType
+        });
     }
 
     if (!pw) return;

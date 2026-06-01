@@ -30,21 +30,33 @@ function escapeHtml(str) {
         .replace(/'/g, '&#39;');
 }
 
+function normalizeType(type, site = '', notes = '') {
+    const raw = String(type || '').trim().toLowerCase();
+    if (raw === 'web' || raw === 'app' || raw === 'db') return raw;
+    if (['database', 'base de datos', 'basedatos', 'base_de_datos'].includes(raw)) return 'db';
+    const hint = `${site || ''}\n${notes || ''}`.toLowerCase();
+    if (/(db_|database|mysql|postgres|sqlserver|sqlite|mariadb)/.test(hint)) return 'db';
+    return String(site || '').includes('.') ? 'web' : 'app';
+}
+
 function mapTypeLabel(type) {
-    return type === 'app' ? 'APP' : 'WEB';
+    if (type === 'app') return 'APP';
+    if (type === 'db') return 'DB';
+    return 'WEB';
 }
 
 function updateTypeUi(type) {
+    const safeType = normalizeType(type);
     const siteLabel = document.getElementById('input-site-label');
     const siteInput = document.getElementById('input-site');
     const urlRow = document.getElementById('input-url-row');
 
-    if (siteLabel) siteLabel.textContent = type === 'app' ? 'Aplicación' : 'Sitio Web';
-    if (siteInput) siteInput.placeholder = type === 'app' ? 'ej: Steam, Spotify, Photoshop' : 'ej: google.com';
-    if (urlRow) urlRow.style.display = type === 'web' ? '' : 'none';
+    if (siteLabel) siteLabel.textContent = safeType === 'app' ? 'Aplicación' : safeType === 'db' ? 'Servidor / Proyecto' : 'Sitio Web';
+    if (siteInput) siteInput.placeholder = safeType === 'app' ? 'ej: Steam, Spotify, Photoshop' : safeType === 'db' ? 'ej: Fundascout Producción' : 'ej: google.com';
+    if (urlRow) urlRow.style.display = (safeType === 'web' || safeType === 'db') ? '' : 'none';
 
     document.querySelectorAll('.pw-type-btn').forEach((btn) => {
-        btn.classList.toggle('active', btn.dataset.type === type);
+        btn.classList.toggle('active', btn.dataset.type === safeType);
     });
 }
 
@@ -174,8 +186,8 @@ function renderPasswords(passwords) {
     passwords.forEach((p) => {
         const card = document.createElement('div');
         card.className = 'password-card';
-        const safeType = (p.type === 'app' || p.type === 'web') ? p.type : (String(p.site || '').includes('.') ? 'web' : 'app');
-        const faviconDomain = safeType === 'web' ? (p.site || p.url || '') : 'app.local';
+        const safeType = normalizeType(p.type, p.site, p.notes);
+        const faviconDomain = safeType === 'web' ? (p.site || p.url || '') : safeType === 'db' ? 'database.local' : 'app.local';
         const favicon = `https://www.google.com/s2/favicons?domain=${encodeURIComponent(faviconDomain)}&sz=64`;
         const encodedUser = encodeURIComponent(p.username || '');
         const encodedPass = encodeURIComponent(p.password || '');
@@ -196,10 +208,10 @@ function renderPasswords(passwords) {
                 </div>
                 <div class="site-info">
                     <h3>${escapeHtml(p.site)} <span class="type-badge">${mapTypeLabel(safeType)}</span></h3>
-                    <p>${safeType === 'web' ? 'Sitio web' : 'Aplicación'}</p>
+                    <p>${safeType === 'web' ? 'Sitio web' : safeType === 'db' ? 'Base de datos' : 'Aplicación'}</p>
                 </div>
             </div>
-            ${safeType === 'web' && p.url ? `<div class="field-url">${escapeHtml(p.url)}</div>` : ''}
+            ${(safeType === 'web' || safeType === 'db') && p.url ? `<div class="field-url">${escapeHtml(p.url)}</div>` : ''}
             <div class="field">
                 <div class="field-label">Usuario</div>
                 <div class="field-value-wrap">
@@ -287,7 +299,7 @@ function editPassword(p) {
     document.getElementById('input-user').value = p.username || '';
     document.getElementById('input-pass').value = p.password || '';
     document.getElementById('input-notes').value = p.notes || '';
-    updateTypeUi(p.type || 'web');
+    updateTypeUi(normalizeType(p.type, p.site, p.notes));
     pwdModal.classList.add('active');
 }
 
@@ -295,7 +307,7 @@ async function savePassword() {
     const site = document.getElementById('input-site').value.trim();
     const user = document.getElementById('input-user').value.trim();
     const pass = document.getElementById('input-pass').value.trim();
-    const type = document.querySelector('.pw-type-btn.active')?.dataset.type || 'web';
+    const type = normalizeType(document.querySelector('.pw-type-btn.active')?.dataset.type || 'web');
     const url = document.getElementById('input-url').value.trim();
     const notes = document.getElementById('input-notes').value.trim();
 
