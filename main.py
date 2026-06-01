@@ -100,6 +100,17 @@ def _db():
     c.execute("CREATE INDEX IF NOT EXISTS idx_video_tags_scope ON video_tags(scope)")
     if 'notes' not in pw_cols:
         c.execute("ALTER TABLE passwords ADD COLUMN notes TEXT DEFAULT ''")
+
+    # Migración: observaciones en agenda, compras e ingresos
+    agenda_cols = {row[1] for row in c.execute("PRAGMA table_info(agenda)").fetchall()}
+    if 'notes' not in agenda_cols:
+        c.execute("ALTER TABLE agenda ADD COLUMN notes TEXT DEFAULT ''")
+    shopping_cols = {row[1] for row in c.execute("PRAGMA table_info(shopping)").fetchall()}
+    if 'notes' not in shopping_cols:
+        c.execute("ALTER TABLE shopping ADD COLUMN notes TEXT DEFAULT ''")
+    income_cols = {row[1] for row in c.execute("PRAGMA table_info(income)").fetchall()}
+    if 'notes' not in income_cols:
+        c.execute("ALTER TABLE income ADD COLUMN notes TEXT DEFAULT ''")
     
     # Inicializar config por defecto si está vacía
     if not c.execute("SELECT key FROM app_config LIMIT 1").fetchone():
@@ -700,8 +711,8 @@ class AgendaBridge(QObject):
 
     @pyqtSlot(result=list)
     def get_agenda(self):
-        c = _db(); res = c.execute("SELECT id, text, dueDate, done FROM agenda ORDER BY id DESC").fetchall(); c.close()
-        return [{"id":r[0],"text":r[1],"dueDate":r[2],"done":bool(r[3])} for r in res]
+        c = _db(); res = c.execute("SELECT id, text, dueDate, done, COALESCE(notes,'') FROM agenda ORDER BY id DESC").fetchall(); c.close()
+        return [{"id":r[0],"text":r[1],"dueDate":r[2],"done":bool(r[3]),"notes":r[4]} for r in res]
 
     @pyqtSlot(str, str)
     def add_agenda(self, text, date):
@@ -723,11 +734,18 @@ class AgendaBridge(QObject):
         c = _db(); c.execute("UPDATE agenda SET done=? WHERE id=?", (int(done), aid)); c.commit(); c.close()
         self.updated.emit()
 
+    @pyqtSlot(str, int, str)
+    def set_item_notes(self, table, item_id, notes):
+        allowed = {'agenda', 'shopping', 'income'}
+        if table not in allowed:
+            return
+        c = _db(); c.execute(f"UPDATE {table} SET notes=? WHERE id=?", (notes, item_id)); c.commit(); c.close()
+        self.updated.emit()
 
     @pyqtSlot(result=list)
     def get_shopping(self):
-        c = _db(); res = c.execute("SELECT id, text, value, currency, dueDate, paymentMethod, done FROM shopping ORDER BY id DESC").fetchall(); c.close()
-        return [{"id":r[0],"text":r[1],"value":r[2],"currency":r[3],"dueDate":r[4],"paymentMethod":r[5],"done":bool(r[6])} for r in res]
+        c = _db(); res = c.execute("SELECT id, text, value, currency, dueDate, paymentMethod, done, COALESCE(notes,'') FROM shopping ORDER BY id DESC").fetchall(); c.close()
+        return [{"id":r[0],"text":r[1],"value":r[2],"currency":r[3],"dueDate":r[4],"paymentMethod":r[5],"done":bool(r[6]),"notes":r[7]} for r in res]
 
     @pyqtSlot(str, float, str, str, str)
     def add_shopping(self, text, val, cur, date, pm):
@@ -752,8 +770,8 @@ class AgendaBridge(QObject):
 
     @pyqtSlot(result=list)
     def get_income(self):
-        c = _db(); res = c.execute("SELECT id, text, value, currency, dueDate, received FROM income ORDER BY id DESC").fetchall(); c.close()
-        return [{"id":r[0],"text":r[1],"value":r[2],"currency":r[3],"dueDate":r[4],"received":bool(r[5])} for r in res]
+        c = _db(); res = c.execute("SELECT id, text, value, currency, dueDate, received, COALESCE(notes,'') FROM income ORDER BY id DESC").fetchall(); c.close()
+        return [{"id":r[0],"text":r[1],"value":r[2],"currency":r[3],"dueDate":r[4],"received":bool(r[5]),"notes":r[6]} for r in res]
 
     @pyqtSlot(str, float, str, str)
     def add_income(self, text, val, cur, date):

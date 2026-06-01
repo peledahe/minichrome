@@ -886,6 +886,7 @@ function renderReminders() {
             <span class="ag-item-text">${escapeHtml(r.text)}</span>
             <div class="ag-item-meta">
                 ${dateStr ? `<span class="ag-badge">📅 ${dateStr}</span>` : ''}
+                <button class="ag-notes-btn ${r.notes ? 'has-notes' : ''}" onclick='openObsModal("agenda", ${r.id}, ${JSON.stringify(r.notes || '')})' title="Observaciones">📝</button>
                 <button class="ag-edit-btn" onclick='openEditModal("reminder", ${jsonStr(r)})'>✏️</button>
                 <button class="ag-delete-btn" onclick="deleteReminder(${r.id})">🗑️</button>
             </div>`;
@@ -1019,6 +1020,7 @@ function renderShopping() {
             <div class="ag-item-meta">
                 <span style="font-weight:700; color:#ff7f50;">${r.currency}${fmtNum(r.value)}</span>
                 <span class="pm-badge ${pmBadgeClass(r.paymentMethod)}">${escapeHtml(r.paymentMethod || 'Pendiente')}</span>
+                <button class="ag-notes-btn ${r.notes ? 'has-notes' : ''}" onclick='openObsModal("shopping", ${r.id}, ${JSON.stringify(r.notes || '')})' title="Observaciones">📝</button>
                 <button class="ag-edit-btn" onclick='openEditModal("shopping", ${jsonStr(r)})'>✏️</button>
                 <button class="ag-delete-btn" onclick="deleteShopping(${r.id})">🗑️</button>
             </div>`;
@@ -1172,6 +1174,7 @@ function renderIncome() {
             <span class="ag-item-text">${escapeHtml(r.text)}</span>
             <div class="ag-item-meta">
                 <span style="font-weight:700; color:#2ed573;">${r.currency}${fmtNum(r.value)}</span>
+                <button class="ag-notes-btn ${r.notes ? 'has-notes' : ''}" onclick='openObsModal("income", ${r.id}, ${JSON.stringify(r.notes || '')})' title="Observaciones">📝</button>
                 <button class="ag-edit-btn" onclick='openEditModal("income", ${jsonStr(r)})'>✏️</button>
                 <button class="ag-delete-btn" onclick="deleteIncome(${r.id})">🗑️</button>
             </div>`;
@@ -2577,6 +2580,41 @@ function generatePassword(length) {
     return out;
 }
 
+// ─── Modal de Observaciones ────────────────────────────────────────────────
+const _obsState = { table: '', id: 0 };
+
+function openObsModal(table, id, currentNotes) {
+    _obsState.table = table;
+    _obsState.id = id;
+    const ta = document.getElementById('obs-textarea');
+    if (ta) ta.value = currentNotes || '';
+    document.getElementById('obs-modal')?.classList.add('active');
+    setTimeout(() => ta?.focus(), 80);
+}
+
+async function saveObsModal() {
+    const notes = (document.getElementById('obs-textarea')?.value || '');
+    await py.set_item_notes(_obsState.table, _obsState.id, notes);
+    closeObsModal();
+    // Refrescar la vista activa
+    if (_obsState.table === 'agenda') fetchReminders(false);
+    else if (_obsState.table === 'shopping') fetchShoppingList(false);
+    else if (_obsState.table === 'income') fetchIncomeList(false);
+    notify('Observaciones guardadas', 'success');
+}
+
+function closeObsModal() {
+    document.getElementById('obs-modal')?.classList.remove('active');
+}
+
+// Listeners del modal de observaciones
+document.getElementById('obs-save-btn')?.addEventListener('click', saveObsModal);
+document.getElementById('obs-cancel-btn')?.addEventListener('click', closeObsModal);
+document.getElementById('obs-close-btn')?.addEventListener('click', closeObsModal);
+document.getElementById('obs-modal')?.addEventListener('click', (e) => {
+    if (e.target === e.currentTarget) closeObsModal();
+});
+
 window.openEditModal = openEditModal;
 window.toggleReminder = toggleReminder;
 window.deleteReminder = deleteReminder;
@@ -2593,3 +2631,4 @@ window.togglePwVisibility = togglePwVisibility;
 window.pwCopy = pwCopy;
 window.openPasswordModal = openPasswordModal;
 window.deletePassword = deletePassword;
+window.openObsModal = openObsModal;

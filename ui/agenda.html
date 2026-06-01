@@ -651,7 +651,14 @@
 
         /* ===== KANBAN ===== */
         #view-kanban { overflow: hidden; }
-        #view-kanban .section-header { margin-bottom: 12px; }
+        #view-kanban .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            flex-wrap: wrap;
+            gap: 16px;
+            margin-bottom: 12px;
+        }
 
         .kb-toolbar {
             display: flex;
@@ -680,6 +687,10 @@
             gap: 6px;
             flex-wrap: wrap;
             align-items: center;
+            justify-content: flex-end;
+            max-width: min(100%, 560px);
+            margin-left: auto;
+            margin-top: 4px;
         }
         .kb-label-chip {
             font-size: 0.72rem;
@@ -697,10 +708,71 @@
 
         .kb-board {
             display: grid;
-            grid-template-columns: repeat(4, 1fr);
+            grid-template-columns: repeat(4, minmax(250px, 1fr));
             gap: 14px;
             height: calc(100vh - 52px - 30px - 24px - 44px - 52px);
             min-height: 0;
+            width: 100%;
+            overflow-x: auto;
+            overflow-y: hidden;
+            padding-bottom: 8px;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        @media (max-width: 1200px) {
+            #view-kanban .section-header {
+                gap: 10px;
+            }
+            .kb-label-filter {
+                flex: 1 1 100%;
+                max-width: none;
+                justify-content: flex-start;
+                margin-left: 0;
+                margin-top: 0;
+            }
+            .kb-board {
+                grid-template-columns: repeat(2, minmax(260px, 1fr));
+                height: auto;
+                overflow-x: hidden;
+                overflow-y: visible;
+            }
+            .ag-content:has(#view-kanban.active) {
+                overflow-y: auto;
+            }
+        }
+
+        @media (max-width: 760px) {
+            #view-kanban .section-header {
+                align-items: stretch;
+            }
+            #view-kanban .section-header h1,
+            #view-kanban .section-header p {
+                width: 100%;
+            }
+            #view-kanban .section-header p {
+                margin-bottom: 2px;
+            }
+            .kb-label-filter {
+                gap: 5px;
+            }
+            .kb-label-chip {
+                font-size: 0.68rem;
+                padding: 3px 8px;
+            }
+            .kb-board {
+                grid-template-columns: 1fr;
+                overflow-x: hidden;
+                overflow-y: visible;
+                height: auto;
+            }
+            .kb-col {
+                min-width: 0;
+                min-height: 300px;
+            }
+            .kb-cards {
+                max-height: none;
+                overflow-y: visible;
+            }
         }
 
         .kb-col {
@@ -2223,9 +2295,8 @@
                     Kanban
                 </h1>
                 <p>Seguimiento de tareas por estatus</p>
+                <div class="kb-label-filter" id="kb-label-filter"></div>
             </div>
-
-            <div class="kb-label-filter" id="kb-label-filter" style="margin-bottom:12px; min-height:20px;"></div>
 
             <div class="kb-board">
                 <!-- Pendientes -->
@@ -2772,6 +2843,109 @@
             cancelBtn.addEventListener('click', () => { cleanup(); callback(false); });
         };
     </script>
+
+    <!-- MODAL OBSERVACIONES -->
+    <div class="obs-modal-overlay" id="obs-modal">
+        <div class="obs-modal-box">
+            <div class="obs-modal-header">
+                <h3 class="obs-modal-title">📝 Observaciones</h3>
+                <button class="obs-close-btn" id="obs-close-btn" title="Cerrar">✕</button>
+            </div>
+            <textarea id="obs-textarea" class="obs-textarea" placeholder="Escribe tus observaciones aquí..."></textarea>
+            <div class="obs-modal-actions">
+                <button class="ag-btn ag-btn-ghost" id="obs-cancel-btn">Cancelar</button>
+                <button class="ag-btn ag-btn-primary" id="obs-save-btn">Guardar</button>
+            </div>
+        </div>
+    </div>
+
+    <style>
+        /* ===== Modal Observaciones ===== */
+        .obs-modal-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.55);
+            z-index: 1100;
+            align-items: center;
+            justify-content: center;
+        }
+        .obs-modal-overlay.active { display: flex; }
+
+        .obs-modal-box {
+            background: var(--ag-card-bg, #1e2030);
+            border: 1px solid var(--ag-border, #2e3148);
+            border-radius: 12px;
+            padding: 24px;
+            width: min(480px, 94vw);
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+        }
+
+        .obs-modal-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .obs-modal-title {
+            margin: 0;
+            font-size: 1rem;
+            font-weight: 600;
+            color: var(--ag-text, #e0e0e0);
+        }
+
+        .obs-close-btn {
+            background: none;
+            border: none;
+            color: var(--ag-text-muted, #888);
+            font-size: 1rem;
+            cursor: pointer;
+            padding: 4px 8px;
+            border-radius: 6px;
+            transition: background 0.15s;
+        }
+        .obs-close-btn:hover { background: rgba(255,255,255,0.08); }
+
+        .obs-textarea {
+            background: var(--ag-input-bg, #13152a);
+            border: 1px solid var(--ag-border, #2e3148);
+            border-radius: 8px;
+            color: var(--ag-text, #e0e0e0);
+            font-size: 0.9rem;
+            font-family: inherit;
+            padding: 10px 12px;
+            min-height: 140px;
+            resize: vertical;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        .obs-textarea:focus { border-color: var(--ag-accent, #5c7cfa); }
+
+        .obs-modal-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+        }
+
+        /* Botón de notas en los items */
+        .ag-notes-btn {
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: 0.95rem;
+            padding: 2px 5px;
+            border-radius: 5px;
+            opacity: 0.55;
+            transition: opacity 0.15s, background 0.15s;
+            line-height: 1;
+            color: var(--ag-text, #e0e0e0);
+        }
+        .ag-notes-btn:hover { opacity: 1; background: rgba(255,255,255,0.07); }
+        .ag-notes-btn.has-notes { opacity: 1; color: #f0a946; }
+    </style>
 
     <script src="theme.js"></script>
     <script src="agenda.js"></script>
