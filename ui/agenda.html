@@ -1546,6 +1546,12 @@
             font-family: inherit;
             font-size: 0.78rem;
             outline: none;
+            color-scheme: dark;
+        }
+
+        .pw-autosave-select option {
+            background: #1a1a22;
+            color: #f8fafc;
         }
 
         .pw-autosave-select:focus {
@@ -1789,6 +1795,30 @@
             color: #b91c1c;
             border-color: #fecaca;
         }
+        :root[data-theme='light'] #view-passwords .pw-autosave-wrap {
+            background: #f8fafc;
+            border: 1px solid #d9e2ef;
+        }
+        :root[data-theme='light'] #view-passwords .pw-autosave-copy strong {
+            color: #0f172a;
+        }
+        :root[data-theme='light'] #view-passwords .pw-autosave-copy small {
+            color: #64748b;
+        }
+        :root[data-theme='light'] #view-passwords .pw-autosave-select {
+            background: #ffffff;
+            border: 1px solid #cbd5e1;
+            color: #0f172a;
+            color-scheme: light;
+        }
+        :root[data-theme='light'] #view-passwords .pw-autosave-select option {
+            background: #ffffff;
+            color: #0f172a;
+        }
+        :root[data-theme='light'] #view-passwords .pw-autosave-select:focus {
+            border-color: #6366f1;
+            box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.12);
+        }
 
         @media (prefers-color-scheme: light) {
             :root:not([data-theme='dark']) #view-passwords .pw-filter-group {
@@ -1866,6 +1896,30 @@
                 background: #fee2e2;
                 color: #b91c1c;
                 border-color: #fecaca;
+            }
+            :root:not([data-theme='dark']) #view-passwords .pw-autosave-wrap {
+                background: #f8fafc;
+                border: 1px solid #d9e2ef;
+            }
+            :root:not([data-theme='dark']) #view-passwords .pw-autosave-copy strong {
+                color: #0f172a;
+            }
+            :root:not([data-theme='dark']) #view-passwords .pw-autosave-copy small {
+                color: #64748b;
+            }
+            :root:not([data-theme='dark']) #view-passwords .pw-autosave-select {
+                background: #ffffff;
+                border: 1px solid #cbd5e1;
+                color: #0f172a;
+                color-scheme: light;
+            }
+            :root:not([data-theme='dark']) #view-passwords .pw-autosave-select option {
+                background: #ffffff;
+                color: #0f172a;
+            }
+            :root:not([data-theme='dark']) #view-passwords .pw-autosave-select:focus {
+                border-color: #6366f1;
+                box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.12);
             }
         }
 
