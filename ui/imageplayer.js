@@ -464,7 +464,7 @@
         gallery.innerHTML = '';
         updateToolbarState();
 
-        state.filtered.forEach((img, idx) => {
+        state.filtered.forEach((img) => {
             const card = document.createElement('div');
             card.className = 'ip-thumb';
             card.dataset.path = img.path;
@@ -538,7 +538,11 @@
                     selectBtn.title = state.selectedPaths.has(img.path) ? 'Quitar de la seleccion' : 'Seleccionar imagen';
                     return;
                 }
-                openLightbox(idx);
+                // Recalcular el indice al momento del click evita indices obsoletos
+                // cuando se elimina una tarjeta sin re-render completo de la galeria.
+                const currentIdx = state.filtered.findIndex((i) => i.path === img.path);
+                if (currentIdx === -1) return;
+                openLightbox(currentIdx);
             });
             gallery.appendChild(card);
         });

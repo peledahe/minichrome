@@ -179,6 +179,7 @@
             height: 12px;
             border-radius: 3px;
             object-fit: cover;
+            display: block;
             flex-shrink: 0;
         }
         .engine-chip .chip-label { line-height: 1; }
@@ -289,6 +290,7 @@
             height: 12px;
             border-radius: 3px;
             object-fit: cover;
+            display: block;
             flex-shrink: 0;
         }
 
@@ -647,13 +649,36 @@
             const domain = domainFromUrl(url);
             if (!domain) return [];
             return [
-                `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=32`,
+                `https://www.google.com/s2/favicons?sz=64&domain_url=${encodeURIComponent(url)}`,
+                `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=64`,
                 `https://icons.duckduckgo.com/ip3/${domain}.ico`,
                 `https://${domain}/favicon.ico`,
             ];
         }
 
-        function setFaviconWithFallback(img, candidates) {
+        function hashString(value) {
+            let hash = 0;
+            for (let i = 0; i < value.length; i += 1) {
+                hash = ((hash << 5) - hash) + value.charCodeAt(i);
+                hash |= 0;
+            }
+            return Math.abs(hash);
+        }
+
+        function createFallbackFavicon(label, seed = '') {
+            const palette = ['#6c5ce7', '#00b894', '#0984e3', '#e17055', '#fd79a8', '#00cec9', '#fdcb6e'];
+            const safeLabel = (label || '?').trim().charAt(0).toUpperCase() || '?';
+            const bg = palette[seed ? hashString(seed) % palette.length : 0];
+            const svg = `
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+                    <rect width="32" height="32" rx="8" fill="${bg}"/>
+                    <text x="16" y="21" text-anchor="middle" font-family="Arial, sans-serif" font-size="16" font-weight="700" fill="#ffffff">${safeLabel}</text>
+                </svg>
+            `;
+            return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+        }
+
+        function setFaviconWithFallback(img, candidates, fallbackLabel = '') {
             if (!img || !candidates.length) {
                 if (img) img.style.display = 'none';
                 return;
@@ -665,7 +690,8 @@
                 if (idx < candidates.length) {
                     img.src = candidates[idx];
                 } else {
-                    img.style.display = 'none';
+                    img.onerror = null;
+                    img.src = createFallbackFavicon(fallbackLabel, candidates[0] || fallbackLabel);
                 }
             };
             img.src = candidates[idx];
@@ -692,7 +718,7 @@
                 chip.textContent = '';
                 const img = document.createElement('img');
                 img.alt = '';
-                setFaviconWithFallback(img, faviconCandidatesFromUrl(homeUrl));
+                setFaviconWithFallback(img, faviconCandidatesFromUrl(homeUrl), label);
 
                 const text = document.createElement('span');
                 text.className = 'chip-label';
@@ -717,7 +743,7 @@
 
                 const img = document.createElement('img');
                 img.alt = '';
-                setFaviconWithFallback(img, faviconCandidatesFromUrl(link.url));
+                setFaviconWithFallback(img, faviconCandidatesFromUrl(link.url), link.name || domainFromUrl(link.url));
 
                 const label = document.createElement('span');
                 label.textContent = link.name;
