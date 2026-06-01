@@ -23,6 +23,25 @@ const sidebar = document.querySelector('.sidebar');
 const closeSidebarMobileBtn = document.getElementById('close-sidebar-mobile');
 
 // --- Elementos Cloud ---
+const closeAppBtn = document.getElementById('close-app-btn');
+
+// Botón para cerrar la aplicación completamente (solo en videoplayer)
+if (closeAppBtn) {
+    closeAppBtn.addEventListener('click', () => {
+        // Si está en un entorno tipo Electron/QtWebEngine, usar la API expuesta
+        if (window.qt && window.qt.closeApp) {
+            window.qt.closeApp();
+        } else if (window.closeApp) {
+            window.closeApp();
+        } else if (typeof py !== 'undefined' && py.close_app) {
+            py.close_app();
+        } else {
+            // Fallback: cerrar ventana del navegador (no siempre funcionará)
+            window.open('', '_self');
+            window.close();
+        }
+    });
+}
 const cloudPlaylistList = document.getElementById('cloud-playlist-list');
 const newCloudPlaylistBtn = document.getElementById('new-cloud-playlist');
 const cloudModal = document.getElementById('cloud-modal');

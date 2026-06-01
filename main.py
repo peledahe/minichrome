@@ -679,7 +679,12 @@ def profile():
 
 # ─── Puente Agenda (Python <=> JS) ───────────────────────────────────────────
 class AgendaBridge(QObject):
+
     updated = pyqtSignal()
+
+    @pyqtSlot()
+    def close_app(self):
+        QApplication.quit()
 
     def __init__(self, parent=None):
         super().__init__(parent)
