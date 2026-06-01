@@ -931,3 +931,247 @@
     background: rgba(239, 68, 68, 0.2) !important;
     color: #b91c1c !important;
 }
+
+/* ============================================================
+   Agenda / tema claro — estandarización de elementos faltantes
+   ============================================================ */
+
+/* ── Badges ── */
+:root[data-theme='light'] .ag-badge {
+    background: rgba(31,41,55,0.08) !important;
+    color: #475569 !important;
+}
+
+/* ── Paginación ── */
+:root[data-theme='light'] .ag-page-btn {
+    background: #ffffff !important;
+    border-color: rgba(31,41,55,0.16) !important;
+    color: #475569 !important;
+}
+:root[data-theme='light'] .ag-page-btn:hover:not(:disabled) {
+    background: #f0f4fb !important;
+    color: #1e293b !important;
+}
+:root[data-theme='light'] .ag-page-label {
+    color: #64748b !important;
+}
+
+/* ── Totals y resumen de pagos ── */
+:root[data-theme='light'] .payment-summary-label {
+    color: #64748b !important;
+}
+:root[data-theme='light'] .payment-summary-amount {
+    color: #1e293b !important;
+}
+:root[data-theme='light'] .payment-summary-amount.gtq {
+    color: #b45309 !important;
+}
+:root[data-theme='light'] .payment-summary-amount.usd {
+    color: #15803d !important;
+}
+:root[data-theme='light'] .shop-totals-divider {
+    background: rgba(31,41,55,0.12) !important;
+}
+:root[data-theme='light'] .shop-total-combined span {
+    color: #4f46e5 !important;
+}
+:root[data-theme='light'] .shop-total-combined span.saldo-positive {
+    color: #15803d !important;
+}
+:root[data-theme='light'] .shop-total-combined span.saldo-negative {
+    color: #b91c1c !important;
+}
+:root[data-theme='light'] .shop-total-item {
+    color: #475569 !important;
+}
+:root[data-theme='light'] .shop-total-item span {
+    color: #0f172a !important;
+}
+
+/* ── Kanban: búsqueda / filtro ── */
+:root[data-theme='light'] .kb-filter-input {
+    background: #ffffff !important;
+    border-color: rgba(31,41,55,0.16) !important;
+    color: #111827 !important;
+}
+:root[data-theme='light'] .kb-filter-input::placeholder {
+    color: #94a3b8 !important;
+}
+
+/* ── Kanban: barra de herramientas del editor ── */
+:root[data-theme='light'] .kb-desc-tool {
+    background: #f0f4fb !important;
+    border-color: rgba(31,41,55,0.16) !important;
+    color: #475569 !important;
+}
+:root[data-theme='light'] .kb-desc-tool:hover {
+    color: #1e293b !important;
+    background: rgba(79,70,229,0.10) !important;
+    border-color: rgba(79,70,229,0.30) !important;
+}
+:root[data-theme='light'] .kb-desc-tool.active {
+    color: #4f46e5 !important;
+    background: rgba(79,70,229,0.14) !important;
+    border-color: rgba(79,70,229,0.40) !important;
+}
+
+/* ── Kanban: popover enlace ── */
+:root[data-theme='light'] .kb-link-popover {
+    background: #ffffff !important;
+    border-color: rgba(79,70,229,0.25) !important;
+    box-shadow: 0 4px 16px rgba(15,23,42,0.10) !important;
+}
+:root[data-theme='light'] .kb-link-btn {
+    background: #f0f4fb !important;
+    border-color: rgba(31,41,55,0.16) !important;
+    color: #334155 !important;
+}
+:root[data-theme='light'] .kb-link-btn:hover {
+    background: #e2e8f4 !important;
+    color: #1e293b !important;
+}
+:root[data-theme='light'] .kb-link-btn.primary {
+    background: rgba(79,70,229,0.14) !important;
+    border-color: rgba(79,70,229,0.30) !important;
+    color: #3730a3 !important;
+}
+
+/* ── Kanban: chips de etiqueta ── */
+:root[data-theme='light'] .kb-label-chip {
+    border-color: rgba(31,41,55,0.18) !important;
+    background: #f0f4fb !important;
+    color: #475569 !important;
+}
+:root[data-theme='light'] .kb-label-chip.active {
+    border-color: #4f46e5 !important;
+    background: rgba(79,70,229,0.12) !important;
+    color: #3730a3 !important;
+}
+:root[data-theme='light'] .kb-label-chip:hover {
+    color: #1e293b !important;
+}
+
+/* ── Kanban: chips de tarjeta ── */
+:root[data-theme='light'] .kb-card-id,
+:root[data-theme='light'] .kb-ts-chip {
+    color: #64748b !important;
+    background: #f0f4fb !important;
+    border-color: rgba(31,41,55,0.12) !important;
+}
+
+/* ── Kanban: editor de descripción ── */
+:root[data-theme='light'] .kb-desc-editor:empty::before {
+    color: #94a3b8 !important;
+}
+:root[data-theme='light'] .kb-desc-editor code {
+    color: #4f46e5 !important;
+    background: rgba(79,70,229,0.08) !important;
+    border-color: rgba(79,70,229,0.20) !important;
+}
+:root[data-theme='light'] .kb-desc-editor a {
+    color: #2563eb !important;
+}
+
+/* ── Medios de pago: configuración ── */
+:root[data-theme='light'] .pm-exchange-row {
+    background: #f0f4fb !important;
+}
+:root[data-theme='light'] .pm-exchange-label {
+    color: #4b5563 !important;
+}
+:root[data-theme='light'] .pm-exchange-unit {
+    color: #b45309 !important;
+}
+:root[data-theme='light'] .pm-method-item {
+    background: #f0f4fb !important;
+    color: #0f172a !important;
+    border: 1px solid rgba(31,41,55,0.08) !important;
+}
+:root[data-theme='light'] .pm-edit-input {
+    background: #ffffff !important;
+    border-color: rgba(79,70,229,0.30) !important;
+    color: #111827 !important;
+}
+
+/* ── Badges de método de pago ── */
+:root[data-theme='light'] .pm-badge-efectivo {
+    background: rgba(37,99,235,0.10) !important;
+    color: #1d4ed8 !important;
+}
+:root[data-theme='light'] .pm-badge-tarjeta {
+    background: rgba(109,40,217,0.10) !important;
+    color: #6d28d9 !important;
+}
+:root[data-theme='light'] .pm-badge-transferencia {
+    background: rgba(5,150,105,0.10) !important;
+    color: #047857 !important;
+}
+:root[data-theme='light'] .pm-badge-default {
+    background: rgba(31,41,55,0.07) !important;
+    color: #475569 !important;
+}
+
+/* ── Modal de contraseñas ── */
+:root[data-theme='light'] .pw-modal-box {
+    background: #ffffff !important;
+    border-color: rgba(31,41,55,0.14) !important;
+    box-shadow: 0 24px 60px rgba(15,23,42,0.15) !important;
+}
+:root[data-theme='light'] .pw-modal-box h3 {
+    color: #0f172a !important;
+}
+:root[data-theme='light'] .pw-modal-label {
+    color: #64748b !important;
+}
+:root[data-theme='light'] .pw-type-btn {
+    background: #f0f4fb !important;
+    border-color: rgba(31,41,55,0.16) !important;
+    color: #475569 !important;
+}
+:root[data-theme='light'] .pw-type-btn.active {
+    background: rgba(79,70,229,0.14) !important;
+    border-color: #4f46e5 !important;
+    color: #3730a3 !important;
+}
+:root[data-theme='light'] .pw-pass-icon-btn {
+    color: #64748b !important;
+}
+:root[data-theme='light'] .pw-pass-icon-btn:hover {
+    color: #1e293b !important;
+    background: #e2e8f0 !important;
+}
+
+/* ── Modal de Observaciones ── */
+:root[data-theme='light'] .obs-modal-box {
+    background: #ffffff !important;
+    border-color: rgba(31,41,55,0.14) !important;
+    box-shadow: 0 8px 32px rgba(15,23,42,0.12) !important;
+}
+:root[data-theme='light'] .obs-modal-title {
+    color: #0f172a !important;
+}
+:root[data-theme='light'] .obs-close-btn {
+    color: #64748b !important;
+}
+:root[data-theme='light'] .obs-close-btn:hover {
+    background: rgba(31,41,55,0.07) !important;
+}
+:root[data-theme='light'] .obs-textarea {
+    background: #f8fafc !important;
+    border-color: rgba(31,41,55,0.16) !important;
+    color: #111827 !important;
+}
+:root[data-theme='light'] .obs-textarea:focus {
+    border-color: #4f46e5 !important;
+}
+:root[data-theme='light'] .obs-textarea::placeholder {
+    color: #94a3b8 !important;
+}
+
+/* ── Botón de observaciones en items ── */
+:root[data-theme='light'] .ag-notes-btn {
+    color: #64748b !important;
+}
+:root[data-theme='light'] .ag-notes-btn.has-notes {
+    color: #b45309 !important;
+}

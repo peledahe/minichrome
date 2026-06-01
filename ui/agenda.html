@@ -9,6 +9,39 @@
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; scrollbar-width: thin; scrollbar-color: rgba(108, 92, 231, 0.35) transparent; }
 
+        /* ── Tokens de tema (usados por obs-modal, checkboxes y nuevos componentes) ── */
+        :root {
+            --ag-check-border:        rgba(255,255,255,0.25);
+            --ag-check-bg:            rgba(255,255,255,0.06);
+            --ag-check-active-border: #2ed573;
+            --ag-check-active-bg:     rgba(46,213,115,0.10);
+            --ag-card-bg:             #1e1f26;
+            --ag-border:              rgba(255,255,255,0.09);
+            --ag-text:                #e8e8f0;
+            --ag-text-muted:          #a0a0a8;
+            --ag-accent:              #6c5ce7;
+            --ag-input-bg:            #1a1a1e;
+            --ag-input-border:        rgba(255,255,255,0.10);
+            --ag-surface:             #1a1a1e;
+            --ag-placeholder:         rgba(255,255,255,0.30);
+        }
+        [data-theme='light'] {
+            --ag-check-border:        rgba(0,0,0,0.22);
+            --ag-check-bg:            rgba(0,0,0,0.04);
+            --ag-check-active-border: #16a34a;
+            --ag-check-active-bg:     rgba(22,163,74,0.08);
+            --ag-card-bg:             #ffffff;
+            --ag-border:              rgba(31,41,55,0.14);
+            --ag-text:                #111827;
+            --ag-text-muted:          #4b5563;
+            --ag-accent:              #4f46e5;
+            --ag-input-bg:            #f8fafc;
+            --ag-input-border:        rgba(31,41,55,0.16);
+            --ag-surface:             #ffffff;
+            --ag-placeholder:         #94a3b8;
+        }
+
+
         ::-webkit-scrollbar { width: 2px; height: 2px; }
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: rgba(108, 92, 231, 0.45); border-radius: 999px; }
@@ -334,8 +367,8 @@
             width: 20px;
             height: 20px;
             border-radius: 5px;
-            border: 2px solid rgba(255,255,255,0.25);
-            background: rgba(255,255,255,0.06);
+            border: 2px solid var(--ag-check-border, rgba(255,255,255,0.25));
+            background: var(--ag-check-bg, rgba(255,255,255,0.06));
             display: flex;
             align-items: center;
             justify-content: center;
@@ -343,29 +376,14 @@
         }
         .ag-check-box svg { display: none; }
         .ag-check-btn:hover .ag-check-box {
-            border-color: #2ed573;
-            background: rgba(46,213,115,0.1);
+            border-color: var(--ag-check-active-border, #2ed573);
+            background: var(--ag-check-active-bg, rgba(46,213,115,0.1));
         }
         .ag-check-btn.checked .ag-check-box {
-            background: #2ed573;
-            border-color: #2ed573;
+            background: var(--ag-check-active-border, #2ed573);
+            border-color: var(--ag-check-active-border, #2ed573);
         }
         .ag-check-btn.checked .ag-check-box svg { display: block; }
-
-        @media (prefers-color-scheme: light) {
-            .ag-check-box {
-                border-color: rgba(0,0,0,0.3);
-                background: rgba(0,0,0,0.04);
-            }
-            .ag-check-btn:hover .ag-check-box {
-                border-color: #27ae60;
-                background: rgba(39,174,96,0.1);
-            }
-            .ag-check-btn.checked .ag-check-box {
-                background: #27ae60;
-                border-color: #27ae60;
-            }
-        }
         .ag-item-paid { opacity: 0.6; }
         .ag-empty { text-align: center; color: #555; padding: 40px 0; font-size: 0.95rem; }
 
@@ -1200,12 +1218,19 @@
         }
 
         /* ===== SETTINGS VIEW ===== */
+        #view-config .cfg-layout-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(320px, 1fr));
+            gap: 14px;
+            align-items: start;
+        }
+        #view-config .cfg-span-all { grid-column: 1 / -1; }
         .cfg-section {
             background: rgba(255,255,255,0.03);
             border: 1px solid rgba(255,255,255,0.07);
             border-radius: 14px;
             padding: 20px 24px;
-            margin-bottom: 14px;
+            margin-bottom: 0;
         }
         .cfg-section-title {
             font-size: 0.75rem;
@@ -1226,6 +1251,31 @@
         .cfg-row-label { display: flex; flex-direction: column; gap: 3px; }
         .cfg-row-label span { font-size: 0.92rem; font-weight: 500; color: #fff; }
         .cfg-row-label small { font-size: 0.78rem; color: rgba(255,255,255,0.38); }
+
+        #view-config .cfg-section-modules .cfg-module-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(230px, 1fr));
+            gap: 10px 12px;
+        }
+        #view-config .cfg-section-modules .cfg-row {
+            margin: 0;
+            padding: 10px 12px;
+            border: 1px solid rgba(255,255,255,0.09);
+            border-bottom: none;
+            border-radius: 10px;
+            background: rgba(255,255,255,0.02);
+        }
+
+        #view-config .cfg-row-vertical {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 8px;
+        }
+        #view-config .cfg-input-group {
+            display: flex;
+            gap: 6px;
+            width: 100%;
+        }
         .cfg-toggle {
             position: relative;
             width: 42px;
@@ -1284,6 +1334,10 @@
             border: 1px solid #d9e1ef;
             box-shadow: 0 8px 20px rgba(15, 23, 42, 0.06);
         }
+        :root[data-theme='light'] #view-config .cfg-section-modules .cfg-row {
+            background: #f8fbff;
+            border-color: #dbe4f2;
+        }
         :root[data-theme='light'] #view-config .cfg-section-title {
             color: #64748b;
         }
@@ -1337,71 +1391,16 @@
             background: #4338ca;
         }
 
-        @media (prefers-color-scheme: light) {
-            :root:not([data-theme='dark']) #view-config .section-header h1 {
-                color: #1f2937;
+        @media (max-width: 1100px) {
+            #view-config .cfg-layout-grid {
+                grid-template-columns: 1fr;
             }
-            :root:not([data-theme='dark']) #view-config .section-header p {
-                color: #64748b;
-            }
-            :root:not([data-theme='dark']) #view-config .cfg-section {
-                background: linear-gradient(180deg, #ffffff 0%, #f9fbff 100%);
-                border: 1px solid #d9e1ef;
-                box-shadow: 0 8px 20px rgba(15, 23, 42, 0.06);
-            }
-            :root:not([data-theme='dark']) #view-config .cfg-section-title {
-                color: #64748b;
-            }
-            :root:not([data-theme='dark']) #view-config .cfg-row {
-                border-bottom: 1px solid #e6ebf5;
-            }
-            :root:not([data-theme='dark']) #view-config .cfg-row-label span {
-                color: #0f172a;
-            }
-            :root:not([data-theme='dark']) #view-config .cfg-row-label small {
-                color: #64748b;
-            }
-            :root:not([data-theme='dark']) #view-config .cfg-toggle-track {
-                background: #dbe4f3;
-                border: 1px solid #c6d3e8;
-            }
-            :root:not([data-theme='dark']) #view-config .cfg-toggle input:checked + .cfg-toggle-track {
-                background: #4f46e5;
-                border-color: #4f46e5;
-            }
-            :root:not([data-theme='dark']) #view-config .cfg-toggle-track::after {
-                background: #ffffff;
-                box-shadow: 0 2px 7px rgba(15, 23, 42, 0.2);
-            }
-            :root:not([data-theme='dark']) #view-config .ag-input {
-                background: #f8fafc;
-                color: #111827;
-                border: 1px solid #cbd5e1;
-            }
-            :root:not([data-theme='dark']) #view-config .ag-input::placeholder {
-                color: #94a3b8;
-            }
-            :root:not([data-theme='dark']) #view-config .ag-input:focus {
-                border-color: #6366f1;
-                box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.12);
-            }
-            :root:not([data-theme='dark']) #view-config .ag-btn-ghost {
-                background: #eef2ff;
-                color: #334155;
-                border: 1px solid #d5dcf7;
-            }
-            :root:not([data-theme='dark']) #view-config .ag-btn-ghost:hover {
-                background: #e0e7ff;
-                color: #1e293b;
-                border-color: #c7d2fe;
-            }
-            :root:not([data-theme='dark']) #view-config .ag-btn-primary {
-                background: #4f46e5;
-            }
-            :root:not([data-theme='dark']) #view-config .ag-btn-primary:hover {
-                background: #4338ca;
+            #view-config .cfg-section-modules .cfg-module-grid {
+                grid-template-columns: 1fr;
             }
         }
+
+
 
         /* ===== NOTAS ADHESIVAS ===== */
         #view-notes { display: none; flex-direction: column; height: calc(100vh - 88px); }
@@ -1963,108 +1962,7 @@
             box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.12);
         }
 
-        @media (prefers-color-scheme: light) {
-            :root:not([data-theme='dark']) #view-passwords .pw-filter-group {
-                background: #eef2f8;
-                border: 1px solid #d7dfec;
-            }
-            :root:not([data-theme='dark']) #view-passwords .pw-filter {
-                color: #64748b;
-            }
-            :root:not([data-theme='dark']) #view-passwords .pw-filter:hover {
-                color: #0f172a;
-                background: #e2e8f0;
-            }
-            :root:not([data-theme='dark']) #view-passwords .pw-filter.active {
-                background: #4f46e5;
-                color: #ffffff;
-                box-shadow: 0 4px 10px rgba(79, 70, 229, 0.22);
-            }
-            :root:not([data-theme='dark']) #view-passwords .pw-empty {
-                color: #94a3b8;
-            }
-            :root:not([data-theme='dark']) #view-passwords .pw-card {
-                background: #ffffff;
-                border: 1px solid #d9e1ef;
-                box-shadow: 0 8px 18px rgba(15, 23, 42, 0.06);
-            }
-            :root:not([data-theme='dark']) #view-passwords .pw-card:hover {
-                background: #fcfdff;
-                border-color: #c6d3eb;
-                box-shadow: 0 10px 22px rgba(15, 23, 42, 0.09);
-            }
-            :root:not([data-theme='dark']) #view-passwords .pw-card-name {
-                color: #0f172a;
-            }
-            :root:not([data-theme='dark']) #view-passwords .pw-card-url {
-                color: #64748b;
-            }
-            :root:not([data-theme='dark']) #view-passwords .pw-field-label {
-                color: #64748b;
-            }
-            :root:not([data-theme='dark']) #view-passwords .pw-field-value {
-                color: #1e293b;
-            }
-            :root:not([data-theme='dark']) #view-passwords .pw-field-value.masked {
-                color: #94a3b8;
-            }
-            :root:not([data-theme='dark']) #view-passwords .pw-copy-btn,
-            :root:not([data-theme='dark']) #view-passwords .pw-show-btn {
-                background: #eef2f7;
-                color: #475569;
-                border: 1px solid #d8e0ec;
-            }
-            :root:not([data-theme='dark']) #view-passwords .pw-copy-btn:hover,
-            :root:not([data-theme='dark']) #view-passwords .pw-show-btn:hover {
-                background: #e2e8f0;
-                color: #1e293b;
-                border-color: #c9d3e3;
-            }
-            :root:not([data-theme='dark']) #view-passwords .pw-copy-btn.copied {
-                background: #dcfce7;
-                color: #15803d;
-                border-color: #bbf7d0;
-            }
-            :root:not([data-theme='dark']) #view-passwords .pw-action-btn {
-                background: #eef2f7;
-                color: #475569;
-                border: 1px solid #d8e0ec;
-            }
-            :root:not([data-theme='dark']) #view-passwords .pw-action-btn:hover {
-                background: #e2e8f0;
-                color: #1e293b;
-                border-color: #c9d3e3;
-            }
-            :root:not([data-theme='dark']) #view-passwords .pw-action-btn.del:hover {
-                background: #fee2e2;
-                color: #b91c1c;
-                border-color: #fecaca;
-            }
-            :root:not([data-theme='dark']) #view-passwords .pw-autosave-wrap {
-                background: #f8fafc;
-                border: 1px solid #d9e2ef;
-            }
-            :root:not([data-theme='dark']) #view-passwords .pw-autosave-copy strong {
-                color: #0f172a;
-            }
-            :root:not([data-theme='dark']) #view-passwords .pw-autosave-copy small {
-                color: #64748b;
-            }
-            :root:not([data-theme='dark']) #view-passwords .pw-autosave-select {
-                background: #ffffff;
-                border: 1px solid #cbd5e1;
-                color: #0f172a;
-                color-scheme: light;
-            }
-            :root:not([data-theme='dark']) #view-passwords .pw-autosave-select option {
-                background: #ffffff;
-                color: #0f172a;
-            }
-            :root:not([data-theme='dark']) #view-passwords .pw-autosave-select:focus {
-                border-color: #6366f1;
-                box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.12);
-            }
-        }
+
 
         /* Modal contraseñas */
         .pw-modal-overlay {
@@ -2379,9 +2277,12 @@
                 <p>Preferencias de la aplicación</p>
             </div>
 
+            <div class="cfg-layout-grid">
+
             <!-- Módulos -->
-            <div class="cfg-section">
+            <div class="cfg-section cfg-section-modules cfg-span-all">
                 <div class="cfg-section-title">Módulos</div>
+                <div class="cfg-module-grid">
                 <div class="cfg-row">
                     <div class="cfg-row-label">
                         <span>Módulo de Video</span>
@@ -2452,17 +2353,18 @@
                         <span class="cfg-toggle-track"></span>
                     </label>
                 </div>
+                </div>
             </div>
 
             <!-- Navegador -->
             <div class="cfg-section">
                 <div class="cfg-section-title">Navegador</div>
-                <div class="cfg-row" style="flex-direction: column; align-items: flex-start; gap: 8px;">
+                <div class="cfg-row cfg-row-vertical">
                     <div class="cfg-row-label">
                         <span>Página inicial</span>
                         <small>URL que abre el navegador al crear una nueva pestaña</small>
                     </div>
-                    <div style="display:flex; gap:6px; width:100%;">
+                    <div class="cfg-input-group">
                         <input type="text" id="cfg-home-url" class="ag-input" style="flex:1; font-size:0.82rem;" placeholder="https://www.google.com">
                         <button class="ag-btn ag-btn-ghost" id="cfg-paste-home-url" title="Pegar del portapapeles" style="padding:0 10px;">📋</button>
                     </div>
@@ -2472,12 +2374,12 @@
             <!-- Reproductor de Video -->
             <div class="cfg-section">
                 <div class="cfg-section-title">Reproductor de Video</div>
-                <div class="cfg-row" style="flex-direction: column; align-items: flex-start; gap: 8px;">
+                <div class="cfg-row cfg-row-vertical">
                     <div class="cfg-row-label">
                         <span>Carpeta de videos</span>
                         <small>Ruta absoluta en el servidor donde se buscan los videos</small>
                     </div>
-                    <div style="display:flex; gap:6px; width:100%;">
+                    <div class="cfg-input-group">
                         <input type="text" id="cfg-media-path" class="ag-input" style="flex:1; font-size:0.82rem;" placeholder="/home/usuario/Videos">
                         <button class="ag-btn ag-btn-ghost" id="cfg-browse-folder" title="Explorar carpetas" style="padding:0 10px;">📂</button>
                     </div>
@@ -2509,12 +2411,12 @@
             <!-- Visor de Imágenes -->
             <div class="cfg-section">
                 <div class="cfg-section-title">Visor de Imágenes</div>
-                <div class="cfg-row" style="flex-direction: column; align-items: flex-start; gap: 8px;">
+                <div class="cfg-row cfg-row-vertical">
                     <div class="cfg-row-label">
                         <span>Carpeta de imágenes</span>
                         <small>Ruta absoluta desde donde se cargan imágenes en ImagePlayer</small>
                     </div>
-                    <div style="display:flex; gap:6px; width:100%;">
+                    <div class="cfg-input-group">
                         <input type="text" id="cfg-image-media-path" class="ag-input" style="flex:1; font-size:0.82rem;" placeholder="/home/usuario/Pictures">
                         <button class="ag-btn ag-btn-ghost" id="cfg-image-browse-folder" title="Explorar carpetas" style="padding:0 10px;">📂</button>
                     </div>
@@ -2537,20 +2439,21 @@
 
             <div class="cfg-section">
                 <div class="cfg-section-title">Capturas de Pantalla</div>
-                <div class="cfg-row" style="flex-direction: column; align-items: flex-start; gap: 8px;">
+                <div class="cfg-row cfg-row-vertical">
                     <div class="cfg-row-label">
                         <span>Carpeta de screenshots</span>
                         <small>Ruta donde se guardan las capturas y las versiones anotadas del editor</small>
                     </div>
-                    <div style="display:flex; gap:6px; width:100%;">
+                    <div class="cfg-input-group">
                         <input type="text" id="cfg-screenshots-path" class="ag-input" style="flex:1; font-size:0.82rem;" placeholder="/home/usuario/Imágenes/Capturas">
                         <button class="ag-btn ag-btn-ghost" id="cfg-screenshots-browse-folder" title="Explorar carpetas" style="padding:0 10px;">📂</button>
                     </div>
                 </div>
             </div>
 
-            <div style="display:flex; justify-content:flex-end; padding-top:4px;">
+            <div class="cfg-span-all" style="display:flex; justify-content:flex-end; padding-top:4px;">
                 <button class="ag-btn ag-btn-primary" id="cfg-save-btn">Guardar cambios</button>
+            </div>
             </div>
         </div>
 
