@@ -2713,6 +2713,7 @@ class Minichrome(QMainWindow):
             ("◷", "#3498db", self._toggle_hist_panel, "Historial de navegación"),
             ("★", "#9b59b6", self._toggle_fav_panel, "Favoritos guardados"),
             ("—", "#febc2e", self.showMinimized, "Minimizar ventana"),
+            ("2x", "#16a085", self._expand_two_screens_left, "Expandir a 2 pantallas desde la izquierda (Ctrl+Shift+2)"),
             ("▢", "#28c840", self._toggle_max, "Maximizar / Restaurar"),
             ("✕", "#ff5f57", self.close, "Cerrar ventana"),
         ]
@@ -2738,6 +2739,28 @@ class Minichrome(QMainWindow):
             self.showNormal()
         else:
             self.showMaximized()
+        self._update_corners()
+
+    def _expand_two_screens_left(self):
+        screens = QApplication.screens()
+        if not screens:
+            return
+
+        ordered = sorted(screens, key=lambda s: s.availableGeometry().x())
+        target = ordered[:2]
+
+        if self.isMaximized() or self.isFullScreen():
+            self.showNormal()
+
+        geoms = [s.availableGeometry() for s in target]
+        left = min(g.x() for g in geoms)
+        top = min(g.y() for g in geoms)
+        right = max(g.x() + g.width() for g in geoms)
+        bottom = max(g.y() + g.height() for g in geoms)
+
+        self.setGeometry(QRect(left, top, right - left, bottom - top))
+        self.raise_()
+        self.activateWindow()
         self._update_corners()
 
     def _update_corners(self):
@@ -3882,6 +3905,7 @@ class Minichrome(QMainWindow):
             if not self._bar_open: self._show_bar()
             self._url.setFocus(); self._url.selectAll()
         elif m == C and k == Qt.Key.Key_Tab:   self._switch((self._active+1)%len(self._views))
+        elif m == CS and k == Qt.Key.Key_2:    self._expand_two_screens_left()
         elif m == C and k == Qt.Key.Key_Equal: self._zoom_in_act()   # Ctrl++
         elif m == C and k == Qt.Key.Key_Minus: self._zoom_out_act()  # Ctrl+-
         elif m == C and k == Qt.Key.Key_0:     self._zoom_reset()    # Ctrl+0
