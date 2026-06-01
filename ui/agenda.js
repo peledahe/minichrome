@@ -1598,6 +1598,12 @@ function updateNotesCount() {
     if (badge) badge.textContent = notesData.length;
 }
 
+function isNotesViewVisible() {
+    const view = document.getElementById('view-notes');
+    const board = document.getElementById('notes-board');
+    return !!(view && board && view.classList.contains('active') && board.clientWidth > 40 && board.clientHeight > 40);
+}
+
 function schedulePersistNoteSize(noteId, width, height) {
     if (!py || typeof py.update_note_size !== 'function') return;
 
@@ -1808,6 +1814,7 @@ function buildNote(note) {
 
     if (window.ResizeObserver) {
         const resizeObserver = new ResizeObserver(() => {
+            if (!isNotesViewVisible()) return;
             const nextW = Math.max(NOTE_MIN_WIDTH, Math.round(div.offsetWidth || NOTE_MIN_WIDTH));
             const nextH = Math.max(NOTE_MIN_HEIGHT, Math.round(div.offsetHeight || NOTE_MIN_HEIGHT));
             note.width = nextW;
@@ -1926,6 +1933,7 @@ document.getElementById('notes-board').addEventListener('dblclick', (e) => {
     new ResizeObserver(() => {
         clearTimeout(resizeTimer);
         resizeTimer = setTimeout(() => {
+            if (!isNotesViewVisible()) return;
             const bw = board.clientWidth  - 10;
             const bh = board.clientHeight - 10;
             const displaced = [];
