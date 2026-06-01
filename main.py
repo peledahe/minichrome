@@ -68,7 +68,7 @@ def _db():
     c.execute("CREATE TABLE IF NOT EXISTS notes(id INTEGER PRIMARY KEY, content TEXT DEFAULT '', color TEXT DEFAULT 'yellow', x INTEGER DEFAULT 20, y INTEGER DEFAULT 20, width INTEGER DEFAULT 220, height INTEGER DEFAULT 170, z_index INTEGER DEFAULT 1, ts DATETIME DEFAULT CURRENT_TIMESTAMP)")
     
     # Tablas de VideoPlayer
-    c.execute("CREATE TABLE IF NOT EXISTS video_tags(url TEXT PRIMARY KEY, data TEXT)")
+    c.execute("CREATE TABLE IF NOT EXISTS video_tags(url TEXT PRIMARY KEY, data TEXT, scope TEXT DEFAULT '')")
     c.execute("CREATE TABLE IF NOT EXISTS video_playback(url TEXT PRIMARY KEY, time REAL)")
     c.execute("CREATE TABLE IF NOT EXISTS video_playlists(id INTEGER PRIMARY KEY, name TEXT, items TEXT)")
     
@@ -93,6 +93,11 @@ def _db():
         c.execute("ALTER TABLE passwords ADD COLUMN type TEXT DEFAULT 'web'")
     if 'url' not in pw_cols:
         c.execute("ALTER TABLE passwords ADD COLUMN url TEXT DEFAULT ''")
+
+    video_tag_cols = {row[1] for row in c.execute("PRAGMA table_info(video_tags)").fetchall()}
+    if 'scope' not in video_tag_cols:
+        c.execute("ALTER TABLE video_tags ADD COLUMN scope TEXT DEFAULT ''")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_video_tags_scope ON video_tags(scope)")
     if 'notes' not in pw_cols:
         c.execute("ALTER TABLE passwords ADD COLUMN notes TEXT DEFAULT ''")
     
@@ -814,6 +819,18 @@ class AgendaBridge(QObject):
         rel_norm = self._normalize_rel(rel_path)
         return f"/media/{rel_norm}" if rel_norm else "/media"
 
+    def _normalize_media_scope(self, media_path):
+        if not media_path:
+            return ""
+        return os.path.abspath(str(media_path)).replace("\\", "/").rstrip("/")
+
+    def _media_scope_file_prefix(self, media_scope):
+        scope_norm = self._normalize_media_scope(media_scope)
+        if not scope_norm:
+            return ""
+        scope_url = QUrl.fromLocalFile(scope_norm).toString()
+        return scope_url if scope_url.endswith("/") else scope_url + "/"
+
     def _migrate_video_metadata(self, old_rel, new_rel):
         old_url = self._rel_to_media_url(old_rel)
         new_url = self._rel_to_media_url(new_rel)
@@ -1464,14 +1481,68 @@ class AgendaBridge(QObject):
         c = _db(); res = c.execute("SELECT url, data FROM video_tags").fetchall(); c.close()
         return json.dumps({r[0]: json.loads(r[1]) for r in res})
 
+    @pyqtSlot(str, result=str)
+    def get_video_tags_for_path(self, media_path):
+        import json
+        scope = self._normalize_media_scope(media_path)
+        c = _db()
+
+        rows = c.execute(
+            "SELECT url, data FROM video_tags WHERE COALESCE(scope, '') = ?",
+            (scope,)
+        ).fetchall()
+
+        tags_map = {}
+        for url, data in rows:
+            try:
+                tags_map[url] = json.loads(data)
+            except Exception:
+                tags_map[url] = {}
+
+        # Compatibilidad: si habia etiquetas antiguas sin scope, migrarlas al scope actual.
+        file_prefix = self._media_scope_file_prefix(scope)
+        if scope and file_prefix:
+            legacy_rows = c.execute(
+                "SELECT url, data FROM video_tags WHERE COALESCE(scope, '') = '' AND url LIKE ?",
+                (f"{file_prefix}%",)
+            ).fetchall()
+
+            migrated = False
+            for url, data in legacy_rows:
+                if url not in tags_map:
+                    try:
+                        tags_map[url] = json.loads(data)
+                    except Exception:
+                        tags_map[url] = {}
+                c.execute("UPDATE video_tags SET scope=? WHERE url=?", (scope, url))
+                migrated = True
+
+            if migrated:
+                c.commit()
+
+        c.close()
+        return json.dumps(tags_map)
+
     @pyqtSlot(str)
     def save_video_tags(self, data_json):
+        # Compatibilidad con clientes viejos: guardar en scope vacio.
+        self.save_video_tags_for_path("", data_json)
+
+    @pyqtSlot(str, str)
+    def save_video_tags_for_path(self, media_path, data_json):
         import json
+        scope = self._normalize_media_scope(media_path)
         tags_map = json.loads(data_json)
+        if not isinstance(tags_map, dict):
+            tags_map = {}
+
         c = _db()
-        c.execute("DELETE FROM video_tags")
+        c.execute("DELETE FROM video_tags WHERE COALESCE(scope, '') = ?", (scope,))
         for url, data in tags_map.items():
-            c.execute("INSERT INTO video_tags(url, data) VALUES(?,?)", (url, json.dumps(data)))
+            c.execute(
+                "INSERT OR REPLACE INTO video_tags(url, data, scope) VALUES(?,?,?)",
+                (url, json.dumps(data), scope)
+            )
         c.commit(); c.close()
 
     @pyqtSlot(result=list)

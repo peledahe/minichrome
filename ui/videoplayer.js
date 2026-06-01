@@ -280,7 +280,12 @@ const playbackHistory = new Map();
 // ── Persistencia server-side (compartida entre instancias) ────────────────────
 async function loadTags() {
     try {
-        videoTags = JSON.parse(await py.get_video_tags());
+        const scopePath = (settings.mediaPath || '').trim();
+        if (typeof py.get_video_tags_for_path === 'function') {
+            videoTags = JSON.parse(await py.get_video_tags_for_path(scopePath));
+        } else {
+            videoTags = JSON.parse(await py.get_video_tags());
+        }
 
         // Compatibilidad con datos viejos: migrar claves /media/* a file://
         let changed = false;
@@ -300,7 +305,11 @@ async function loadTags() {
         }
 
         if (changed) {
-            py.save_video_tags(JSON.stringify(videoTags));
+            if (typeof py.save_video_tags_for_path === 'function') {
+                await py.save_video_tags_for_path(scopePath, JSON.stringify(videoTags));
+            } else {
+                py.save_video_tags(JSON.stringify(videoTags));
+            }
         }
     } catch(e) {
         videoTags = {};
@@ -382,6 +391,8 @@ saveSettingsBtn.addEventListener('click', async () => {
     if (settings.mediaPath) {
         await savePathToServer(settings.mediaPath);
     }
+
+    await loadTags();
 
     resetPlayer(); // Limpiar el reproductor al cambiar de biblioteca
     settingsModal.style.display = 'none';
@@ -2098,7 +2109,12 @@ function updatePlayerTagChips(video) {
 }
 
 function saveTags() {
-    py.save_video_tags(JSON.stringify(videoTags));
+    const scopePath = (settings.mediaPath || '').trim();
+    if (typeof py.save_video_tags_for_path === 'function') {
+        py.save_video_tags_for_path(scopePath, JSON.stringify(videoTags));
+    } else {
+        py.save_video_tags(JSON.stringify(videoTags));
+    }
     renderTagsList();
     updateVideoQuickActions();
     updatePlayerTagChips();
