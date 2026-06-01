@@ -729,6 +729,27 @@
             -webkit-box-orient: vertical;
             overflow: hidden;
         }
+        .kb-card-desc strong { color: rgba(255,255,255,0.92); font-weight: 700; }
+        .kb-card-desc em { color: rgba(255,255,255,0.78); font-style: italic; }
+        .kb-card-desc code {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+            font-size: 0.72rem;
+            color: #c6bcff;
+            background: rgba(108,92,231,0.16);
+            border: 1px solid rgba(108,92,231,0.28);
+            border-radius: 4px;
+            padding: 1px 4px;
+        }
+        .kb-card-desc a {
+            color: #8dc4ff;
+            text-decoration: underline;
+            text-underline-offset: 2px;
+            text-decoration-color: rgba(141,196,255,0.6);
+        }
+        .kb-card-desc a:hover {
+            color: #b8ddff;
+            text-decoration-color: rgba(184,221,255,0.9);
+        }
         .kb-card-desc:empty { display: none; }
         .kb-card-labels {
             display: flex;
@@ -882,11 +903,131 @@
             border: 1px solid rgba(255,255,255,0.1);
             border-radius: 16px;
             padding: 26px 28px;
-            width: min(520px, 92vw);
+            width: min(760px, 94vw);
+            max-height: 94vh;
+            overflow-y: auto;
+            overflow-x: hidden;
             display: flex;
             flex-direction: column;
             gap: 14px;
         }
+        .kb-desc-toolbar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-top: -4px;
+            margin-bottom: 2px;
+        }
+        .kb-desc-tool {
+            background: rgba(255,255,255,0.06);
+            border: 1px solid rgba(255,255,255,0.12);
+            color: rgba(255,255,255,0.78);
+            border-radius: 7px;
+            font-size: 0.78rem;
+            font-family: inherit;
+            width: 32px;
+            height: 30px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
+            cursor: pointer;
+            transition: all 0.16s;
+        }
+        .kb-desc-tool svg {
+            width: 14px;
+            height: 14px;
+            fill: currentColor;
+        }
+        .kb-desc-tool:hover {
+            color: #fff;
+            background: rgba(108,92,231,0.2);
+            border-color: rgba(108,92,231,0.45);
+        }
+        .kb-desc-tool.active {
+            color: #fff;
+            background: rgba(108,92,231,0.34);
+            border-color: rgba(108,92,231,0.62);
+            box-shadow: 0 0 0 1px rgba(108,92,231,0.18);
+        }
+        .kb-desc-input {
+            resize: both;
+            min-height: 220px;
+            line-height: 1.48;
+            flex: 0 0 auto;
+        }
+        .kb-desc-editor {
+            height: 220px;
+            min-height: 220px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-break: break-word;
+            padding: 12px 14px;
+            outline: none;
+            cursor: text;
+            user-select: text;
+        }
+        .kb-desc-editor:empty::before {
+            content: attr(data-placeholder);
+            color: rgba(255,255,255,0.28);
+            pointer-events: none;
+        }
+        .kb-desc-editor ul,
+        .kb-desc-editor ol {
+            margin: 6px 0 6px 18px;
+        }
+        .kb-desc-editor code {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+            font-size: 0.82em;
+            color: #c6bcff;
+            background: rgba(108,92,231,0.16);
+            border: 1px solid rgba(108,92,231,0.28);
+            border-radius: 4px;
+            padding: 1px 4px;
+        }
+        .kb-desc-editor a {
+            color: #8dc4ff;
+            text-decoration: underline;
+            text-underline-offset: 2px;
+        }
+        .kb-link-popover {
+            display: none;
+            margin-top: 4px;
+            padding: 10px;
+            border-radius: 10px;
+            border: 1px solid rgba(108,92,231,0.32);
+            background: rgba(15,17,24,0.92);
+            box-shadow: inset 0 0 0 1px rgba(255,255,255,0.03);
+        }
+        .kb-link-popover.active { display: block; }
+        .kb-link-fields {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }
+        .kb-link-actions {
+            margin-top: 8px;
+            display: flex;
+            justify-content: flex-end;
+            gap: 6px;
+        }
+        .kb-link-btn {
+            padding: 5px 10px;
+            border-radius: 7px;
+            border: 1px solid rgba(255,255,255,0.12);
+            background: rgba(255,255,255,0.06);
+            color: rgba(255,255,255,0.86);
+            cursor: pointer;
+            font-size: 0.76rem;
+            font-family: inherit;
+        }
+        .kb-link-btn:hover { background: rgba(255,255,255,0.12); color: #fff; }
+        .kb-link-btn.primary {
+            border-color: rgba(108,92,231,0.55);
+            background: rgba(108,92,231,0.28);
+            color: #fff;
+        }
+        .kb-link-btn.primary:hover { background: rgba(108,92,231,0.4); }
         .kb-modal-box h3 { font-size: 1rem; font-weight: 700; }
         .kb-modal-label-row {
             display: flex;
@@ -2313,7 +2454,34 @@
             <h3 id="kb-modal-title">Nueva tarjeta</h3>
 
             <input type="text" id="kb-card-title" class="ag-input" placeholder="Título de la tarjeta *">
-            <textarea id="kb-card-desc" class="ag-input" rows="3" placeholder="Descripción (opcional)" style="resize:vertical; min-height:70px;"></textarea>
+            <div class="kb-desc-toolbar">
+                <button type="button" class="kb-desc-tool" id="kb-tool-bold" onclick="kbApplyFormat('bold')" title="Negrita" aria-label="Negrita">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15.6 10.79A4.21 4.21 0 0 0 12.4 3H6v18h7.2a4.8 4.8 0 0 0 2.4-9.21zM9 6h3.4a1.4 1.4 0 0 1 0 2.8H9V6zm4.2 12H9v-3.6h4.2a1.8 1.8 0 0 1 0 3.6z"/></svg>
+                </button>
+                <button type="button" class="kb-desc-tool" id="kb-tool-italic" onclick="kbApplyFormat('italic')" title="Cursiva" aria-label="Cursiva">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 4v3h2.21l-3.42 10H6v3h8v-3h-2.21l3.42-10H18V4z"/></svg>
+                </button>
+                <button type="button" class="kb-desc-tool" id="kb-tool-code" onclick="kbApplyFormat('code')" title="Código" aria-label="Código">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8.59 16.59 4 12l4.59-4.59L10 8.82 6.83 12 10 15.18zm6.82 0L14 15.18 17.17 12 14 8.82l1.41-1.41L20 12zm-6.98 3.12L11.17 4l2.24.4-2.74 15.71z"/></svg>
+                </button>
+                <button type="button" class="kb-desc-tool" id="kb-link-tool-btn" onclick="kbApplyFormat('link')" title="Agregar enlace" aria-label="Agregar enlace">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.9 12a5 5 0 0 1 1.46-3.54l2.1-2.1a5 5 0 0 1 7.07 7.07l-1.4 1.4-1.42-1.42 1.4-1.4a3 3 0 1 0-4.24-4.24l-2.1 2.1a3 3 0 0 0 4.24 4.24l.35-.35 1.41 1.42-.35.35A5 5 0 0 1 3.9 12zm6.2 5.95 1.4-1.4 1.42 1.42-1.4 1.4a5 5 0 0 1-7.07-7.07l.35-.35 1.41 1.42-.35.35a3 3 0 0 0 4.24 4.24zm3.19-8.48 1.42 1.42-4.24 4.24-1.42-1.42z"/></svg>
+                </button>
+                <button type="button" class="kb-desc-tool" id="kb-tool-list" onclick="kbApplyFormat('list')" title="Lista" aria-label="Lista">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h14v2H7zm0 6h14v2H7zm0 6h14v2H7zM3 6.5A1.5 1.5 0 1 0 3 3.5a1.5 1.5 0 0 0 0 3zm0 6A1.5 1.5 0 1 0 3 9.5a1.5 1.5 0 0 0 0 3zm0 6A1.5 1.5 0 1 0 3 15.5a1.5 1.5 0 0 0 0 3z"/></svg>
+                </button>
+            </div>
+            <div id="kb-link-popover" class="kb-link-popover">
+                <div class="kb-link-fields">
+                    <input type="text" id="kb-link-label" class="ag-input" placeholder="Texto del enlace" style="font-size:0.82rem;">
+                    <input type="text" id="kb-link-url" class="ag-input" placeholder="https://..." style="font-size:0.82rem;">
+                </div>
+                <div class="kb-link-actions">
+                    <button type="button" id="kb-link-cancel" class="kb-link-btn">Cancelar</button>
+                    <button type="button" id="kb-link-insert" class="kb-link-btn primary">Insertar</button>
+                </div>
+            </div>
+            <div id="kb-card-desc" class="ag-input kb-desc-input kb-desc-editor" contenteditable="true" data-placeholder="Descripción (opcional)"></div>
 
             <div>
                 <div style="font-size:0.78rem; color:rgba(255,255,255,0.4); margin-bottom:8px; text-transform:uppercase; letter-spacing:0.06em;">Etiquetas</div>

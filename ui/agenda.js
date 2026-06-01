@@ -264,6 +264,13 @@ function bindKanbanEvents() {
     const kbCancelBtn = document.getElementById('kb-modal-cancel');
     const kbSaveBtn = document.getElementById('kb-modal-save');
     const kbAddLabelBtn = document.getElementById('kb-add-label-btn');
+    const kbLinkInsertBtn = document.getElementById('kb-link-insert');
+    const kbLinkCancelBtn = document.getElementById('kb-link-cancel');
+    const kbLinkUrlInput = document.getElementById('kb-link-url');
+    const kbLinkLabelInput = document.getElementById('kb-link-label');
+    const kbDescTools = document.querySelectorAll('.kb-desc-tool');
+    kbBindToolbarSync();
+    kbBindModalSizeSync();
 
     if (kbCancelBtn) kbCancelBtn.onclick = () => closeKanbanModal();
     if (kbSaveBtn) kbSaveBtn.onclick = saveKanbanCard;
@@ -278,6 +285,50 @@ function bindKanbanEvents() {
         input.value = '';
         renderKbLabelSelector();
     };
+
+    kbDescTools.forEach((btn) => {
+        btn.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+        });
+    });
+
+    if (kbLinkInsertBtn) kbLinkInsertBtn.onclick = kbInsertLinkFromPopover;
+    if (kbLinkCancelBtn) kbLinkCancelBtn.onclick = kbCloseLinkPopover;
+
+    if (kbLinkUrlInput) {
+        kbLinkUrlInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                kbInsertLinkFromPopover();
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                kbCloseLinkPopover();
+            }
+        });
+    }
+
+    if (kbLinkLabelInput) {
+        kbLinkLabelInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                kbInsertLinkFromPopover();
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                kbCloseLinkPopover();
+            }
+        });
+    }
+
+    document.addEventListener('click', (e) => {
+        const pop = document.getElementById('kb-link-popover');
+        if (!pop || !pop.classList.contains('active')) return;
+
+        const linkTool = document.getElementById('kb-link-tool-btn');
+        if (pop.contains(e.target) || (linkTool && linkTool.contains(e.target))) return;
+        kbCloseLinkPopover();
+    });
+
+    kbSyncDescToolbarState();
 }
 
 function bindPasswordEvents() {
@@ -1227,6 +1278,8 @@ function parseKanbanCardText(text) {
     // Formato: Title | Description | Vence: YYYY-MM-DD | Prioridad: high|medium|low | Etiquetas: tag1, tag2
     const parts = (text || '').split(' | ').map(p => p.trim());
     const result = { title: '', description: '', due: '', priority: 'medium', labels: [] };
+    const descParts = [];
+    let titleSet = false;
     
     for (const part of parts) {
         if (part.startsWith('Vence: ')) {
@@ -1237,13 +1290,385 @@ function parseKanbanCardText(text) {
         } else if (part.startsWith('Etiquetas: ')) {
             const labels = part.replace('Etiquetas: ', '').split(',').map(l => l.trim()).filter(l => l);
             result.labels = labels;
-        } else if (!result.title) {
+        } else if (!titleSet) {
             result.title = part;
-        } else if (!result.description) {
-            result.description = part;
+            titleSet = true;
+        } else {
+            descParts.push(part);
         }
     }
+
+    result.description = descParts.join(' | ');
     return result;
+}
+
+function sanitizeKbHtml(raw) {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(`<div>${raw || ''}</div>`, 'text/html');
+    const root = doc.body.firstElementChild;
+    if (!root) return '';
+
+    const allowedTags = new Set(['B', 'STRONG', 'I', 'EM', 'U', 'S', 'CODE', 'BR', 'UL', 'OL', 'LI', 'A', 'DIV', 'P']);
+
+    const cleanNode = (node) => {
+        if (node.nodeType === Node.TEXT_NODE) {
+            return doc.createTextNode(node.textContent || '');
+        }
+
+        if (node.nodeType !== Node.ELEMENT_NODE) {
+            return doc.createTextNode('');
+        }
+
+        const tag = (node.tagName || '').toUpperCase();
+        if (!allowedTags.has(tag)) {
+            const frag = doc.createDocumentFragment();
+            Array.from(node.childNodes).forEach((child) => frag.appendChild(cleanNode(child)));
+            return frag;
+        }
+
+        const el = doc.createElement(tag.toLowerCase());
+        if (tag === 'A') {
+            let href = (node.getAttribute('href') || '').trim();
+            if (!/^https?:\/\//i.test(href)) href = '';
+            if (href) {
+                el.setAttribute('href', href);
+                el.setAttribute('target', '_blank');
+                el.setAttribute('rel', 'noopener noreferrer');
+            }
+        }
+
+        Array.from(node.childNodes).forEach((child) => el.appendChild(cleanNode(child)));
+        return el;
+    };
+
+    const out = doc.createElement('div');
+    Array.from(root.childNodes).forEach((child) => out.appendChild(cleanNode(child)));
+    return out.innerHTML;
+}
+
+function legacyMarkdownToKbHtml(text) {
+    if (!text) return '';
+    let html = escapeHtml(text).replace(/\r\n?/g, '\n');
+    html = html.replace(/`([^`\n]+)`/g, '<code>$1</code>');
+    html = html.replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/gi, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+    html = html.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
+    html = html.replace(/\*(?!\*)([^*\n]+)\*(?!\*)/g, '<em>$1</em>');
+    html = html.split('\n').map((line) => {
+        if (line.startsWith('- ')) return `&bull; ${line.slice(2)}`;
+        return line;
+    }).join('<br>');
+    return html;
+}
+
+function renderKbDescription(text) {
+    if (!text) return '';
+    const hasHtml = /<\/?[a-z][\s\S]*>/i.test(text);
+    return hasHtml ? sanitizeKbHtml(text) : legacyMarkdownToKbHtml(text);
+}
+
+function getKbDescEditor() {
+    return document.getElementById('kb-card-desc');
+}
+
+function setKbDescEditorContent(text) {
+    const editor = getKbDescEditor();
+    if (!editor) return;
+    editor.innerHTML = renderKbDescription(text || '');
+    kbSyncDescToolbarState();
+}
+
+function getKbDescEditorContent() {
+    const editor = getKbDescEditor();
+    if (!editor) return '';
+    return sanitizeKbHtml(editor.innerHTML || '').trim();
+}
+
+let kbSavedSelectionRange = null;
+let kbToolbarSyncBound = false;
+let kbModalSizeObserver = null;
+let kbEditorDefaultSize = null;
+let kbSizingSyncBusy = false;
+
+function kbEnsureEditorDefaultSize() {
+    const editor = getKbDescEditor();
+    if (!editor || kbEditorDefaultSize) return;
+
+    const rect = editor.getBoundingClientRect();
+    const width = Math.round(rect.width || editor.offsetWidth || 0);
+    const height = Math.round(rect.height || editor.offsetHeight || 0);
+    if (width <= 0 || height <= 0) return;
+
+    kbEditorDefaultSize = {
+        width,
+        height
+    };
+}
+
+function kbClampEditorToModalLimits() {
+    if (kbSizingSyncBusy) return;
+
+    const modal = document.getElementById('kb-modal');
+    const box = modal?.querySelector('.kb-modal-box');
+    const editor = getKbDescEditor();
+    if (!modal || !box || !editor) return;
+    if (!modal.classList.contains('active')) return;
+
+    kbEnsureEditorDefaultSize();
+    if (!kbEditorDefaultSize) return;
+
+    kbSizingSyncBusy = true;
+    try {
+        const chromePadding = 56;
+        const viewportMaxModalW = Math.floor(window.innerWidth * 0.94);
+        const maxEditorWidth = Math.max(320, viewportMaxModalW - chromePadding);
+        const minEditorWidth = Math.min(kbEditorDefaultSize.width, maxEditorWidth);
+
+        const currentWidth = Math.round(editor.getBoundingClientRect().width || editor.offsetWidth || minEditorWidth);
+        const clampedWidth = Math.min(maxEditorWidth, Math.max(minEditorWidth, currentWidth));
+
+        editor.style.minWidth = `${minEditorWidth}px`;
+        editor.style.maxWidth = `${maxEditorWidth}px`;
+        if (Math.abs(clampedWidth - currentWidth) > 1) {
+            editor.style.width = `${clampedWidth}px`;
+        }
+
+        const maxModalHeight = Math.floor(window.innerHeight * 0.94);
+        const boxHeight = Math.round(box.getBoundingClientRect().height || box.offsetHeight || 0);
+        const editorHeight = Math.round(editor.getBoundingClientRect().height || editor.offsetHeight || kbEditorDefaultSize.height);
+        const nonEditorHeight = Math.max(0, boxHeight - editorHeight);
+
+        const availableEditorHeight = Math.max(140, maxModalHeight - nonEditorHeight - 2);
+        const minEditorHeight = Math.min(kbEditorDefaultSize.height, availableEditorHeight);
+        const maxEditorHeight = Math.max(minEditorHeight, availableEditorHeight);
+
+        const currentHeight = Math.round(editor.getBoundingClientRect().height || editor.offsetHeight || minEditorHeight);
+        const clampedHeight = Math.min(maxEditorHeight, Math.max(minEditorHeight, currentHeight));
+
+        editor.style.minHeight = `${minEditorHeight}px`;
+        editor.style.maxHeight = `${maxEditorHeight}px`;
+        if (Math.abs(clampedHeight - currentHeight) > 1) {
+            editor.style.height = `${clampedHeight}px`;
+        }
+    } finally {
+        kbSizingSyncBusy = false;
+    }
+}
+
+function kbUpdateModalSizeFromEditor() {
+    const modal = document.getElementById('kb-modal');
+    const box = modal?.querySelector('.kb-modal-box');
+    const editor = getKbDescEditor();
+    if (!modal || !box || !editor) return;
+    if (!modal.classList.contains('active')) return;
+
+    kbClampEditorToModalLimits();
+
+    const viewportMax = Math.floor(window.innerWidth * 0.94);
+    const chromePadding = 56;
+    const measuredEditorWidth = Math.round(editor.offsetWidth || 0);
+    const desiredWidth = Math.max(760, measuredEditorWidth + chromePadding);
+    box.style.width = `${Math.min(viewportMax, desiredWidth)}px`;
+}
+
+function kbBindModalSizeSync() {
+    if (kbModalSizeObserver) return;
+
+    const editor = getKbDescEditor();
+    if (!editor || !window.ResizeObserver) return;
+
+    kbModalSizeObserver = new ResizeObserver(() => {
+        kbUpdateModalSizeFromEditor();
+    });
+    kbModalSizeObserver.observe(editor);
+    window.addEventListener('resize', kbUpdateModalSizeFromEditor);
+}
+
+function kbSaveSelectionRange() {
+    const editor = getKbDescEditor();
+    const sel = window.getSelection();
+    if (!editor || !sel || !sel.rangeCount) return;
+    const range = sel.getRangeAt(0);
+    if (!editor.contains(range.startContainer) || !editor.contains(range.endContainer)) return;
+    kbSavedSelectionRange = range.cloneRange();
+}
+
+function kbRestoreSelectionRange() {
+    const sel = window.getSelection();
+    if (!sel) return;
+    sel.removeAllRanges();
+    if (kbSavedSelectionRange) sel.addRange(kbSavedSelectionRange);
+}
+
+function kbNodeInTag(editor, tagName) {
+    const sel = window.getSelection();
+    if (!editor || !sel || !sel.rangeCount) return false;
+
+    const anchor = sel.anchorNode;
+    if (!anchor) return false;
+    let node = anchor.nodeType === Node.ELEMENT_NODE ? anchor : anchor.parentElement;
+
+    while (node && node !== editor) {
+        if ((node.tagName || '').toUpperCase() === tagName) return true;
+        node = node.parentElement;
+    }
+    return false;
+}
+
+function kbSyncDescToolbarState() {
+    const editor = getKbDescEditor();
+    if (!editor) return;
+
+    const sel = window.getSelection();
+    const inEditor = !!(sel && sel.rangeCount && editor.contains(sel.anchorNode));
+
+    const btnBold = document.getElementById('kb-tool-bold');
+    const btnItalic = document.getElementById('kb-tool-italic');
+    const btnCode = document.getElementById('kb-tool-code');
+    const btnLink = document.getElementById('kb-link-tool-btn');
+    const btnList = document.getElementById('kb-tool-list');
+
+    const setActive = (btn, active) => {
+        if (!btn) return;
+        btn.classList.toggle('active', !!active);
+    };
+
+    if (!inEditor) {
+        setActive(btnBold, false);
+        setActive(btnItalic, false);
+        setActive(btnCode, false);
+        setActive(btnLink, false);
+        setActive(btnList, false);
+        return;
+    }
+
+    let isBold = false;
+    let isItalic = false;
+    let isList = false;
+    try {
+        isBold = !!document.queryCommandState('bold');
+        isItalic = !!document.queryCommandState('italic');
+        isList = !!document.queryCommandState('insertUnorderedList');
+    } catch (_err) {
+        // Ignorar en motores donde queryCommandState no esté disponible.
+    }
+
+    const isCode = kbNodeInTag(editor, 'CODE');
+    const isLink = kbNodeInTag(editor, 'A');
+
+    setActive(btnBold, isBold);
+    setActive(btnItalic, isItalic);
+    setActive(btnCode, isCode);
+    setActive(btnLink, isLink);
+    setActive(btnList, isList);
+}
+
+function kbBindToolbarSync() {
+    if (kbToolbarSyncBound) return;
+
+    const editor = getKbDescEditor();
+    if (!editor) return;
+    kbToolbarSyncBound = true;
+
+    editor.addEventListener('keyup', kbSyncDescToolbarState);
+    editor.addEventListener('mouseup', kbSyncDescToolbarState);
+    editor.addEventListener('input', kbSyncDescToolbarState);
+    editor.addEventListener('focus', kbSyncDescToolbarState);
+    document.addEventListener('selectionchange', kbSyncDescToolbarState);
+}
+
+function kbOpenLinkPopover() {
+    const pop = document.getElementById('kb-link-popover');
+    const labelInput = document.getElementById('kb-link-label');
+    const urlInput = document.getElementById('kb-link-url');
+    const editor = getKbDescEditor();
+    if (!pop || !labelInput || !urlInput || !editor) return;
+
+    kbSaveSelectionRange();
+    let selected = '';
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount) selected = (sel.toString() || '').trim();
+
+    labelInput.value = selected && !/^https?:\/\//i.test(selected) ? selected : '';
+    urlInput.value = /^https?:\/\//i.test(selected) ? selected : 'https://';
+    pop.classList.add('active');
+
+    if (urlInput.value === 'https://') {
+        urlInput.focus();
+        urlInput.setSelectionRange(urlInput.value.length, urlInput.value.length);
+    } else {
+        labelInput.focus();
+        labelInput.select();
+    }
+}
+
+function kbCloseLinkPopover() {
+    const pop = document.getElementById('kb-link-popover');
+    const editor = getKbDescEditor();
+    if (pop) pop.classList.remove('active');
+    if (editor) editor.focus();
+    kbSyncDescToolbarState();
+}
+
+function kbInsertLinkFromPopover() {
+    const labelInput = document.getElementById('kb-link-label');
+    const urlInput = document.getElementById('kb-link-url');
+    const editor = getKbDescEditor();
+    if (!labelInput || !urlInput || !editor) return;
+
+    let url = (urlInput.value || '').trim();
+    if (!url) return;
+    if (!/^https?:\/\//i.test(url)) url = `https://${url.replace(/^\/+/, '')}`;
+
+    kbRestoreSelectionRange();
+    const sel = window.getSelection();
+    const selected = sel ? (sel.toString() || '').trim() : '';
+    const label = (labelInput.value || '').trim() || selected || 'enlace';
+    const safeLabel = escapeHtml(label);
+    const safeUrl = escapeHtml(url);
+
+    document.execCommand('insertHTML', false, `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${safeLabel}</a>`);
+    kbSavedSelectionRange = null;
+    kbCloseLinkPopover();
+    kbSyncDescToolbarState();
+}
+
+function kbApplyFormat(kind) {
+    const editor = getKbDescEditor();
+    if (!editor) return;
+    editor.focus();
+
+    if (kind === 'list') {
+        document.execCommand('insertUnorderedList', false);
+        kbSyncDescToolbarState();
+        return;
+    }
+
+    if (kind === 'link') {
+        kbOpenLinkPopover();
+        return;
+    }
+
+    if (kind === 'bold') {
+        document.execCommand('bold', false);
+        kbSyncDescToolbarState();
+        return;
+    }
+
+    if (kind === 'italic') {
+        document.execCommand('italic', false);
+        kbSyncDescToolbarState();
+        return;
+    }
+
+    if (kind === 'code') {
+        kbSaveSelectionRange();
+        kbRestoreSelectionRange();
+        const sel = window.getSelection();
+        const selectedText = sel ? sel.toString() : '';
+        const safe = escapeHtml(selectedText || 'codigo');
+        document.execCommand('insertHTML', false, `<code>${safe}</code>`);
+        kbSyncDescToolbarState();
+    }
 }
 
 function renderKbLabelSelector() {
@@ -1387,7 +1812,7 @@ async function fetchKanban() {
                     <span class="kb-status-chip ${escapeHtml(status)}">${escapeHtml(statusMeta[status] || 'Pendiente')}</span>
                 </div>
                 <div class="kb-card-title">${escapeHtml(parsed.title)}</div>
-                ${parsed.description ? `<div class="kb-card-desc">${escapeHtml(parsed.description)}</div>` : ''}
+                ${parsed.description ? `<div class="kb-card-desc">${renderKbDescription(parsed.description)}</div>` : ''}
                 ${labelsHtml}
                 <div class="kb-card-meta">
                     <span class="kb-priority ${parsed.priority}">${priorityLabels[parsed.priority]}</span>
@@ -1465,19 +1890,26 @@ async function openKanbanModal(status) {
     if (statusInput) statusInput.value = status;
 
     const title = document.getElementById('kb-card-title');
-    const desc = document.getElementById('kb-card-desc');
+    const desc = getKbDescEditor();
     const due = document.getElementById('kb-card-due');
     const prio = document.getElementById('kb-card-priority');
     const newLabel = document.getElementById('kb-new-label-input');
 
     if (title) title.value = '';
-    if (desc) desc.value = '';
+    if (desc) setKbDescEditorContent('');
     if (due) due.value = '';
     if (prio) prio.value = 'medium';
     if (newLabel) newLabel.value = '';
 
+    const linkLabel = document.getElementById('kb-link-label');
+    const linkUrl = document.getElementById('kb-link-url');
+    if (linkLabel) linkLabel.value = '';
+    if (linkUrl) linkUrl.value = 'https://';
+    kbCloseLinkPopover();
+
     renderKbLabelSelector();
     document.getElementById('kb-modal')?.classList.add('active');
+    requestAnimationFrame(kbUpdateModalSizeFromEditor);
 }
 
 async function editKanbanCard(cardId) {
@@ -1507,17 +1939,26 @@ async function editKanbanCard(cardId) {
     
     document.getElementById('kb-modal-title').textContent = 'Editar tarjeta';
     document.getElementById('kb-card-title').value = parsed.title;
-    document.getElementById('kb-card-desc').value = parsed.description || '';
+    setKbDescEditorContent(parsed.description || '');
     document.getElementById('kb-card-due').value = parsed.due || '';
     document.getElementById('kb-card-priority').value = parsed.priority;
     document.getElementById('kb-card-status').value = colMap[targetCol] || 'pending';
     document.getElementById('kb-new-label-input').value = '';
+    const linkLabel = document.getElementById('kb-link-label');
+    const linkUrl = document.getElementById('kb-link-url');
+    if (linkLabel) linkLabel.value = '';
+    if (linkUrl) linkUrl.value = 'https://';
+    kbCloseLinkPopover();
     
     renderKbLabelSelector();
     document.getElementById('kb-modal')?.classList.add('active');
+    requestAnimationFrame(kbUpdateModalSizeFromEditor);
 }
 
 function closeKanbanModal() {
+    kbCloseLinkPopover();
+    const box = document.querySelector('#kb-modal .kb-modal-box');
+    if (box) box.style.width = '';
     document.getElementById('kb-modal')?.classList.remove('active');
 }
 
@@ -1526,7 +1967,7 @@ async function saveKanbanCard() {
     if (!title) return;
 
     const status = document.getElementById('kb-card-status')?.value || state.kbModalStatus;
-    const desc = (document.getElementById('kb-card-desc')?.value || '').trim();
+    const desc = getKbDescEditorContent();
     const due = (document.getElementById('kb-card-due')?.value || '').trim();
     const priority = (document.getElementById('kb-card-priority')?.value || 'medium').trim();
 
@@ -2141,6 +2582,7 @@ window.toggleIncome = toggleIncome;
 window.deleteIncome = deleteIncome;
 window.removePmDraft = removePmDraft;
 window.deleteKanbanCard = deleteKanbanCard;
+window.kbApplyFormat = kbApplyFormat;
 window.updateNoteText = updateNoteText;
 window.deleteNote = deleteNote;
 window.togglePwVisibility = togglePwVisibility;
