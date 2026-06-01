@@ -721,7 +721,10 @@
             transition: all 0.18s;
             white-space: nowrap;
         }
-        .kb-label-chip.active { border-color: #6c5ce7; background: rgba(108,92,231,0.2); color: #a29bfe; }
+        .kb-label-chip.active {
+            box-shadow: 0 0 0 1px rgba(255,255,255,0.16), 0 0 0 3px rgba(108,92,231,0.14);
+            transform: translateY(-1px);
+        }
         .kb-label-chip:hover { color: #fff; }
 
         .kb-board {
@@ -916,14 +919,32 @@
             display: flex;
             flex-wrap: wrap;
             gap: 4px;
-            margin-bottom: 8px;
+            margin-top: 0;
+            margin-bottom: 0;
         }
         .kb-label {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
             font-size: 0.68rem;
             font-weight: 600;
             padding: 2px 8px;
             border-radius: 20px;
-            opacity: 0.85;
+            opacity: 0.95;
+            border: 1px solid transparent;
+            white-space: nowrap;
+        }
+        .kb-card-footer {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            margin-top: 6px;
+            min-height: 28px;
+        }
+        .kb-card-footer .kb-card-labels {
+            flex: 1 1 auto;
+            align-items: center;
         }
         .kb-card-actions {
             display: flex;
@@ -931,6 +952,7 @@
             gap: 4px;
             opacity: 0;
             transition: opacity 0.15s;
+            flex: 0 0 auto;
         }
         .kb-card:hover .kb-card-actions { opacity: 1; }
         .kb-card-btn {
@@ -985,6 +1007,7 @@
             border-radius: 5px;
             letter-spacing: 0.04em;
             text-transform: uppercase;
+            white-space: nowrap;
         }
         .kb-priority.high   { background: rgba(214,48,49,0.15);  color: #ff7675; border: 1px solid rgba(214,48,49,0.3); }
         .kb-priority.medium { background: rgba(253,203,110,0.12); color: #fdcb6e; border: 1px solid rgba(253,203,110,0.25); }
@@ -995,7 +1018,7 @@
             align-items: center;
             gap: 6px;
             flex-wrap: wrap;
-            margin-top: 6px;
+            margin-top: 4px;
         }
 
         .kb-card-top {
@@ -1004,6 +1027,13 @@
             justify-content: space-between;
             gap: 8px;
             margin-bottom: 6px;
+        }
+        .kb-card-top-left {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            min-width: 0;
+            flex: 1 1 auto;
         }
         .kb-card-id {
             font-size: 0.66rem;
@@ -1197,15 +1227,20 @@
             align-items: center;
         }
         .kb-modal-label-chip {
+            display: inline-flex;
+            align-items: center;
             font-size: 0.75rem;
             padding: 3px 10px;
             border-radius: 20px;
             cursor: pointer;
             border: 1px solid transparent;
             transition: all 0.15s;
-            opacity: 0.55;
+            opacity: 0.75;
         }
-        .kb-modal-label-chip.selected { opacity: 1; }
+        .kb-modal-label-chip.selected {
+            opacity: 1;
+            box-shadow: 0 0 0 1px rgba(255,255,255,0.14), 0 0 0 3px rgba(108,92,231,0.16);
+        }
         .kb-modal-label-chip:not(.selected) { filter: grayscale(0.6); }
         .kb-modal-new-label {
             display: flex;

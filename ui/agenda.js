@@ -1459,6 +1459,38 @@ function parseKanbanCardText(text) {
     return result;
 }
 
+const KB_LABEL_PALETTE = [
+    { bg: 'rgba(253,203,110,0.16)', border: 'rgba(253,203,110,0.38)', text: '#fdcb6e' },
+    { bg: 'rgba(108,92,231,0.18)', border: 'rgba(108,92,231,0.40)', text: '#c6bcff' },
+    { bg: 'rgba(0,184,148,0.16)', border: 'rgba(0,184,148,0.38)', text: '#55efc4' },
+    { bg: 'rgba(9,132,227,0.16)', border: 'rgba(9,132,227,0.38)', text: '#74b9ff' },
+    { bg: 'rgba(225,112,85,0.18)', border: 'rgba(225,112,85,0.40)', text: '#ff9f8e' },
+    { bg: 'rgba(232,67,147,0.16)', border: 'rgba(232,67,147,0.36)', text: '#ff9fd0' },
+    { bg: 'rgba(72,219,251,0.14)', border: 'rgba(72,219,251,0.34)', text: '#8ee6ff' },
+    { bg: 'rgba(155,89,182,0.16)', border: 'rgba(155,89,182,0.36)', text: '#d0a7ff' },
+    { bg: 'rgba(46,213,115,0.14)', border: 'rgba(46,213,115,0.34)', text: '#8ef0b5' },
+    { bg: 'rgba(255,159,67,0.16)', border: 'rgba(255,159,67,0.34)', text: '#ffc17d' }
+];
+
+function hashKbLabel(label) {
+    const text = String(label || '').trim().toLowerCase();
+    let hash = 0;
+    for (let i = 0; i < text.length; i += 1) {
+        hash = ((hash << 5) - hash) + text.charCodeAt(i);
+        hash |= 0;
+    }
+    return Math.abs(hash);
+}
+
+function getKbLabelTheme(label) {
+    return KB_LABEL_PALETTE[hashKbLabel(label) % KB_LABEL_PALETTE.length];
+}
+
+function getKbLabelStyle(label) {
+    const theme = getKbLabelTheme(label);
+    return `background:${theme.bg};border-color:${theme.border};color:${theme.text};`;
+}
+
 function sanitizeKbHtml(raw) {
     const parser = new DOMParser();
     const doc = parser.parseFromString(`<div>${raw || ''}</div>`, 'text/html');
@@ -1835,7 +1867,7 @@ function renderKbLabelSelector() {
     container.innerHTML = state.kbAvailableLabels.map(label => `
         <div class="kb-modal-label-chip ${state.kbSelectedLabels.has(label) ? 'selected' : ''}" 
              onclick="toggleKbLabel('${escapeHtml(label)}')"
-             style="cursor:pointer;">
+             style="${getKbLabelStyle(label)}cursor:pointer;">
             ${escapeHtml(label)}
         </div>
     `).join('');
@@ -1957,7 +1989,7 @@ async function fetchKanban() {
             const dueInfo = getKbDueInfo(parsed.due, status);
             const dueLiClass = dueInfo ? `due-${dueInfo.cls}` : '';
             const labelsHtml = parsed.labels.length > 0 
-                ? `<div class="kb-card-labels">${parsed.labels.map(l => `<span class="kb-label">${escapeHtml(l)}</span>`).join('')}</div>`
+                ? `<div class="kb-card-labels">${parsed.labels.map(l => `<span class="kb-label" style="${getKbLabelStyle(l)}">${escapeHtml(l)}</span>`).join('')}</div>`
                 : '';
             
             return `
@@ -1965,19 +1997,23 @@ async function fetchKanban() {
                  ondragstart="kbDragStart(event, ${card.id})"
                  ondragend="kbDragEnd(event)">
                 <div class="kb-card-top">
-                    <span class="kb-card-id">#${escapeHtml(shortId || '------')}</span>
+                    <div class="kb-card-top-left">
+                        <span class="kb-card-id">#${escapeHtml(shortId || '------')}</span>
+                        <span class="kb-priority ${parsed.priority}">${priorityLabels[parsed.priority]}</span>
+                    </div>
                     <span class="kb-status-chip ${escapeHtml(status)}">${escapeHtml(statusMeta[status] || 'Pendiente')}</span>
                 </div>
                 <div class="kb-card-title">${escapeHtml(parsed.title)}</div>
                 ${parsed.description ? `<div class="kb-card-desc">${renderKbDescription(parsed.description)}</div>` : ''}
-                ${labelsHtml}
                 <div class="kb-card-meta">
-                    <span class="kb-priority ${parsed.priority}">${priorityLabels[parsed.priority]}</span>
                     ${dueInfo ? `<div class="kb-due ${dueInfo.cls}">${dueInfo.dot} ${dueInfo.label}</div>` : ''}
                 </div>
-                <div class="kb-card-actions">
-                    <button class="kb-card-btn" onclick="editKanbanCard(${card.id})">✏️</button>
-                    <button class="kb-card-btn del" onclick="deleteKanbanCard(${card.id})">🗑️</button>
+                <div class="kb-card-footer">
+                    ${labelsHtml}
+                    <div class="kb-card-actions">
+                        <button class="kb-card-btn" onclick="editKanbanCard(${card.id})">✏️</button>
+                        <button class="kb-card-btn del" onclick="deleteKanbanCard(${card.id})">🗑️</button>
+                    </div>
                 </div>
             </div>`;
         }).join('');
@@ -2022,7 +2058,7 @@ function kbRenderLabelFilter() {
     container.innerHTML = state.kbAvailableLabels.map(label => `
         <div class="kb-label-chip ${state.kbActiveLabel === label ? 'active' : ''}" 
              onclick="toggleKbLabelFilter('${escapeHtml(label)}')"
-             style="cursor:pointer;">
+             style="${getKbLabelStyle(label)}cursor:pointer;">
             ${escapeHtml(label)}
         </div>
     `).join('');
