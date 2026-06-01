@@ -345,7 +345,9 @@ async function loadSettings() {
     }
     configMediaPath.value = settings.mediaPath;
     configStartMuted.checked = settings.startMuted;
-    configHomeUrl.value = settings.homeUrl || settings.privacyUrl || '';
+    if (configHomeUrl) {
+        configHomeUrl.value = settings.homeUrl || settings.privacyUrl || '';
+    }
     sortSelect.value = settings.sortBy || 'name-asc';
 
     await fetchFolders();
@@ -383,7 +385,9 @@ closeSettingsBtn.addEventListener('click', () => {
 saveSettingsBtn.addEventListener('click', async () => {
     settings.mediaPath = configMediaPath.value;
     settings.startMuted = configStartMuted.checked;
-    settings.homeUrl = configHomeUrl.value;
+    if (configHomeUrl) {
+        settings.homeUrl = configHomeUrl.value;
+    }
 
     await saveAppSettings(settings);
     localStorage.setItem('videoStreamSettings', JSON.stringify(settings));
@@ -1265,7 +1269,7 @@ confirmDeleteBtn.addEventListener('click', async () => {
     } else if (shopItemToDelete !== null) {
         await deleteShopItemConfirmed();
     } else if (isDeletingAllTags) {
-        clearAllTagsConfirmed();
+        await clearAllTagsConfirmed();
     } else if (cloudPlaylistToDelete !== null) {
         cloudPlaylists.splice(cloudPlaylistToDelete, 1);
         try {
@@ -1445,11 +1449,27 @@ async function deleteShopItemConfirmed() {
     }
 }
 
-function clearAllTagsConfirmed() {
-    videoTags = {};
-    saveTags();
-    // showNotification('Todas las etiquetas han sido eliminadas', 'info');
-    closeDeleteModal();
+async function clearAllTagsConfirmed() {
+    try {
+        const scopePath = (settings.mediaPath || '').trim();
+
+        if (typeof py.clear_video_tags_for_path === 'function') {
+            await py.clear_video_tags_for_path(scopePath);
+            await loadTags();
+        } else {
+            // Fallback para versiones antiguas del bridge.
+            videoTags = {};
+            saveTags();
+        }
+
+        renderTagsList();
+        updateVideoQuickActions();
+        updatePlayerTagChips();
+    } catch (e) {
+        showNotification('Error al borrar etiquetas de la biblioteca actual', 'error');
+    } finally {
+        closeDeleteModal();
+    }
 }
 
 
@@ -2174,8 +2194,9 @@ if (clearAllTagsBtn) {
 
         const modalTitle = deleteModal.querySelector('h3');
         const modalText = deleteModal.querySelector('p');
+        const activeLibraryPath = (configMediaPath.value || settings.mediaPath || '').trim();
         modalTitle.textContent = '¿Borrar Todas las Etiquetas?';
-        modalText.textContent = 'Esta acción eliminará todas las etiquetas asignadas a tus videos. No se borrarán los videos, solo la organización por etiquetas.';
+        modalText.innerHTML = `Esta acción eliminará las etiquetas de la biblioteca actual.<br><br><span style="opacity:0.8; font-size:0.86rem;">Ruta: <strong>${activeLibraryPath || '(sin ruta configurada)'}</strong></span>`;
 
         deleteModal.classList.add('active');
     });

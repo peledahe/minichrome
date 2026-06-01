@@ -1545,6 +1545,13 @@ class AgendaBridge(QObject):
             )
         c.commit(); c.close()
 
+    @pyqtSlot(str)
+    def clear_video_tags_for_path(self, media_path):
+        scope = self._normalize_media_scope(media_path)
+        c = _db()
+        c.execute("DELETE FROM video_tags WHERE COALESCE(scope, '') = ?", (scope,))
+        c.commit(); c.close()
+
     @pyqtSlot(result=list)
     def get_kanban_cols(self):
         c = _db(); res = c.execute("SELECT id, title, pos FROM kanban_cols ORDER BY pos ASC").fetchall(); c.close()
