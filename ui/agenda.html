@@ -290,7 +290,81 @@
         /* Campos secundarios pueden reducirse pero no demasiado */
         .input-row .ag-input-sm  { flex: 0 0 110px; }
         .input-row .ag-input-md  { flex: 0 0 160px; min-width: 130px; }
+        .input-row .ag-input-tag { flex: 0 0 150px; min-width: 120px; }
         .input-row .ag-input-num { flex: 1 1 100px; min-width: 80px; max-width: 160px; }
+        .agenda-filter-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin: -6px 0 14px;
+        }
+        .agenda-filter-label {
+            font-size: 0.84rem;
+            color: #a0a0a8;
+            white-space: nowrap;
+        }
+        .agenda-filter-select {
+            flex: 0 0 220px;
+            max-width: min(220px, 100%);
+        }
+        .agenda-tags-helper {
+            margin: -4px 0 14px;
+            padding: 10px 12px;
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 10px;
+            background: rgba(0,0,0,0.16);
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .agenda-tags-helper-title {
+            font-size: 0.77rem;
+            color: #9aa0b7;
+            margin: 0;
+        }
+        .agenda-tag-chip-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            min-height: 30px;
+        }
+        .agenda-tag-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            border-radius: 999px;
+            padding: 3px 9px;
+            font-size: 0.74rem;
+            border: 1px solid rgba(108,92,231,0.34);
+            background: rgba(108,92,231,0.18);
+            color: #d5ceff;
+        }
+        .agenda-tag-chip button {
+            border: none;
+            background: transparent;
+            color: inherit;
+            cursor: pointer;
+            line-height: 1;
+            padding: 0;
+            opacity: 0.8;
+            font-size: 0.82rem;
+        }
+        .agenda-tag-chip button:hover { opacity: 1; }
+        .agenda-tag-chip.clickable {
+            cursor: pointer;
+            border-color: rgba(255,255,255,0.2);
+            background: rgba(255,255,255,0.08);
+            color: #cfd5df;
+        }
+        .agenda-tag-chip.clickable:hover {
+            border-color: rgba(108,92,231,0.45);
+            background: rgba(108,92,231,0.2);
+            color: #ece8ff;
+        }
+        .agenda-tag-chip-empty {
+            font-size: 0.75rem;
+            color: #777d92;
+        }
         .ag-input {
             flex: 1;
             background: #1a1a1e;
@@ -343,6 +417,18 @@
             padding: 2px 8px;
             border-radius: 6px;
             color: #a0a0a8;
+        }
+        .ag-tag-badge {
+            font-size: 0.74rem;
+            background: rgba(108,92,231,0.2);
+            border: 1px solid rgba(108,92,231,0.38);
+            color: #d5ceff;
+            padding: 2px 8px;
+            border-radius: 999px;
+            max-width: 170px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
         }
         .ag-delete-btn, .ag-edit-btn {
             background: none; border: none; cursor: pointer;
@@ -2126,8 +2212,21 @@
             <div class="input-row">
                 <input type="text" id="new-reminder-input" class="ag-input ag-input-main" placeholder="Nueva tarea o recordatorio...">
                 <button class="ag-btn ag-btn-ghost" id="paste-reminder" title="Pegar del portapapeles">📋</button>
+                <input type="text" id="new-reminder-tag" class="ag-input ag-input-tag" placeholder="Etiquetas (coma separadas)">
                 <input type="date" id="new-reminder-date" class="ag-input ag-input-md" title="Fecha límite">
                 <button class="ag-btn ag-btn-primary" id="add-reminder-btn">Añadir</button>
+            </div>
+            <div class="agenda-tags-helper">
+                <p class="agenda-tags-helper-title">Etiquetas de la tarea nueva:</p>
+                <div id="new-reminder-tag-current" class="agenda-tag-chip-list"></div>
+                <p class="agenda-tags-helper-title">Etiquetas existentes (clic para añadir):</p>
+                <div id="new-reminder-tag-available" class="agenda-tag-chip-list"></div>
+            </div>
+            <div class="agenda-filter-row">
+                <label for="reminder-tag-filter" class="agenda-filter-label">Filtrar por etiqueta:</label>
+                <select id="reminder-tag-filter" class="ag-input agenda-filter-select">
+                    <option value="__all__">Todas</option>
+                </select>
             </div>
             <div id="reminders-list" class="ag-list">
                 <div class="ag-empty">Cargando tareas...</div>
@@ -2547,6 +2646,15 @@
             </div>
             <div class="edit-modal-row">
                 <input type="date" id="edit-date" class="ag-input" style="flex:1;" title="Fecha límite">
+            </div>
+            <div class="edit-modal-row" id="edit-tag-row" style="display:none;">
+                <input type="text" id="edit-tag" class="ag-input" style="flex:1;" placeholder="Etiquetas (coma separadas)">
+            </div>
+            <div id="edit-tag-helper" class="agenda-tags-helper" style="display:none; margin-top:-6px;">
+                <p class="agenda-tags-helper-title">Etiquetas de esta tarea:</p>
+                <div id="edit-reminder-tag-current" class="agenda-tag-chip-list"></div>
+                <p class="agenda-tags-helper-title">Etiquetas existentes (clic para añadir):</p>
+                <div id="edit-reminder-tag-available" class="agenda-tag-chip-list"></div>
             </div>
             <div class="edit-modal-row" id="edit-value-row">
                 <select id="edit-currency" class="ag-input ag-input-sm">

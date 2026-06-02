@@ -5,9 +5,12 @@
 let py = null;
 let pw = null;
 const PAGE_SIZE = 20;
+const REMINDER_TAG_ALL = '__all__';
+const REMINDER_TAG_NONE = '__none__';
 
 const state = {
     reminders: [],
+    reminderTagFilter: REMINDER_TAG_ALL,
     shopping: [],
     income: [],
     kanbanSearch: '',
@@ -115,6 +118,21 @@ function bindStaticEvents() {
     const addReminderBtn = document.getElementById('add-reminder-btn');
     if (addReminderBtn) addReminderBtn.onclick = addReminder;
 
+    const newReminderTagInput = document.getElementById('new-reminder-tag');
+    if (newReminderTagInput) {
+        newReminderTagInput.addEventListener('input', renderNewReminderTagHelper);
+        newReminderTagInput.addEventListener('blur', () => normalizeReminderTagInput('new-reminder-tag'));
+    }
+
+    const reminderTagFilter = document.getElementById('reminder-tag-filter');
+    if (reminderTagFilter) {
+        reminderTagFilter.addEventListener('change', (e) => {
+            state.reminderTagFilter = e.target.value || REMINDER_TAG_ALL;
+            state.page.reminders = 1;
+            renderReminders();
+        });
+    }
+
     const addShopBtn = document.getElementById('add-shop-btn');
     if (addShopBtn) addShopBtn.onclick = addShopping;
 
@@ -129,6 +147,12 @@ function bindStaticEvents() {
 
     const editSaveBtn = document.getElementById('edit-save-btn');
     if (editSaveBtn) editSaveBtn.onclick = saveEdit;
+
+    const editTagInput = document.getElementById('edit-tag');
+    if (editTagInput) {
+        editTagInput.addEventListener('input', renderEditReminderTagHelper);
+        editTagInput.addEventListener('blur', () => normalizeReminderTagInput('edit-tag'));
+    }
 
     const editCancelBtn = document.getElementById('edit-cancel-btn');
     if (editCancelBtn) editCancelBtn.onclick = () => hideEditModal();
@@ -186,6 +210,119 @@ function bindPasteButton(btnId, inputId) {
         } catch (_err) {
             notify('No se pudo leer el portapapeles', 'info');
         }
+    });
+}
+
+function parseReminderTags(raw) {
+    const seen = new Set();
+    const out = [];
+    String(raw || '')
+        .split(',')
+        .map((tag) => tag.trim())
+        .filter((tag) => !!tag)
+        .forEach((tag) => {
+            const key = tag.toLocaleLowerCase('es');
+            if (seen.has(key)) return;
+            seen.add(key);
+            out.push(tag);
+        });
+    return out;
+}
+
+function tagsToCsv(tags) {
+    return parseReminderTags((tags || []).join(',')).join(', ');
+}
+
+function normalizeReminderTagInput(inputId) {
+    const input = document.getElementById(inputId);
+    if (!input) return;
+    input.value = tagsToCsv(parseReminderTags(input.value));
+    if (inputId === 'new-reminder-tag') renderNewReminderTagHelper();
+    if (inputId === 'edit-tag') renderEditReminderTagHelper();
+}
+
+function getReminderTagsFromRow(reminder) {
+    return parseReminderTags(reminder?.tag || '');
+}
+
+function getAllReminderTags(excludeReminderId = null) {
+    const pool = new Set();
+    state.reminders.forEach((r) => {
+        if (excludeReminderId !== null && Number(r.id) === Number(excludeReminderId)) return;
+        getReminderTagsFromRow(r).forEach((tag) => pool.add(tag));
+    });
+    return Array.from(pool).sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' }));
+}
+
+function renderReminderTagChips(containerId, tags, onRemove) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    if (!tags.length) {
+        container.innerHTML = '<span class="agenda-tag-chip-empty">Sin etiquetas</span>';
+        return;
+    }
+    container.innerHTML = tags.map((tag, idx) => `
+        <span class="agenda-tag-chip">🏷️ ${escapeHtml(tag)} <button type="button" data-idx="${idx}" title="Quitar">×</button></span>
+    `).join('');
+    container.querySelectorAll('button[data-idx]').forEach((btn) => {
+        btn.addEventListener('click', () => onRemove(Number(btn.dataset.idx)));
+    });
+}
+
+function renderReminderTagPool(containerId, tags, onAdd) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    if (!tags.length) {
+        container.innerHTML = '<span class="agenda-tag-chip-empty">No hay otras etiquetas</span>';
+        return;
+    }
+    container.innerHTML = tags.map((tag) => `
+        <span class="agenda-tag-chip clickable" data-tag="${escapeHtml(tag)}">${escapeHtml(tag)} +</span>
+    `).join('');
+    container.querySelectorAll('.agenda-tag-chip.clickable[data-tag]').forEach((chip) => {
+        chip.addEventListener('click', () => onAdd(chip.dataset.tag || ''));
+    });
+}
+
+function renderNewReminderTagHelper() {
+    const input = document.getElementById('new-reminder-tag');
+    if (!input) return;
+    const selected = parseReminderTags(input.value);
+    const selectedSet = new Set(selected.map((t) => t.toLocaleLowerCase('es')));
+    const available = getAllReminderTags().filter((tag) => !selectedSet.has(tag.toLocaleLowerCase('es')));
+
+    renderReminderTagChips('new-reminder-tag-current', selected, (idx) => {
+        selected.splice(idx, 1);
+        input.value = tagsToCsv(selected);
+        renderNewReminderTagHelper();
+    });
+
+    renderReminderTagPool('new-reminder-tag-available', available, (tag) => {
+        const next = parseReminderTags(`${input.value},${tag}`);
+        input.value = tagsToCsv(next);
+        renderNewReminderTagHelper();
+    });
+}
+
+function renderEditReminderTagHelper() {
+    const input = document.getElementById('edit-tag');
+    const helper = document.getElementById('edit-tag-helper');
+    if (!input || !helper || state.editModal.mode !== 'reminder') return;
+
+    const selected = parseReminderTags(input.value);
+    const selectedSet = new Set(selected.map((t) => t.toLocaleLowerCase('es')));
+    const available = getAllReminderTags(state.editModal.id).filter((tag) => !selectedSet.has(tag.toLocaleLowerCase('es')));
+
+    renderReminderTagChips('edit-reminder-tag-current', selected, (idx) => {
+        selected.splice(idx, 1);
+        input.value = tagsToCsv(selected);
+        renderEditReminderTagHelper();
+    });
+
+    renderReminderTagPool('edit-reminder-tag-available', available, (tag) => {
+        const next = parseReminderTags(`${input.value},${tag}`);
+        input.value = tagsToCsv(next);
+        renderEditReminderTagHelper();
     });
 }
 
@@ -890,6 +1027,9 @@ function openEditModal(mode, item) {
     const title = document.getElementById('edit-modal-title');
     const text = document.getElementById('edit-text');
     const date = document.getElementById('edit-date');
+    const tag = document.getElementById('edit-tag');
+    const tagRow = document.getElementById('edit-tag-row');
+    const tagHelper = document.getElementById('edit-tag-helper');
     const valRow = document.getElementById('edit-value-row');
     const pmRow = document.getElementById('edit-payment-method-row');
 
@@ -901,11 +1041,17 @@ function openEditModal(mode, item) {
 
     if (text) text.value = item.text || '';
     if (date) date.value = item.dueDate || '';
+    if (tag) tag.value = tagsToCsv(parseReminderTags(item.tag || ''));
 
     if (mode === 'reminder') {
+        if (tagRow) tagRow.style.display = 'flex';
+        if (tagHelper) tagHelper.style.display = 'flex';
         if (valRow) valRow.style.display = 'none';
         if (pmRow) pmRow.style.display = 'none';
+        renderEditReminderTagHelper();
     } else {
+        if (tagRow) tagRow.style.display = 'none';
+        if (tagHelper) tagHelper.style.display = 'none';
         if (valRow) valRow.style.display = 'flex';
         const editValue = document.getElementById('edit-value');
         const editCurrency = document.getElementById('edit-currency');
@@ -936,11 +1082,12 @@ async function saveEdit() {
 
     const text = (document.getElementById('edit-text')?.value || '').trim();
     const date = document.getElementById('edit-date')?.value || '';
+    const tag = tagsToCsv(parseReminderTags(document.getElementById('edit-tag')?.value || ''));
     if (!text) return;
 
     try {
         if (mode === 'reminder') {
-            await py.update_agenda(id, text, date || '');
+            await py.update_agenda(id, text, date || '', tag);
             await fetchReminders(false);
         } else if (mode === 'shopping') {
             const val = parseFloat(document.getElementById('edit-value')?.value || '0') || 0;
@@ -1005,10 +1152,42 @@ async function fetchReminders(resetPage = true) {
     }
 }
 
+function getReminderTagOptions() {
+    return Array.from(new Set(
+        state.reminders
+            .flatMap((r) => getReminderTagsFromRow(r))
+    )).sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' }));
+}
+
+function renderReminderTagFilter() {
+    const select = document.getElementById('reminder-tag-filter');
+    if (!select) return;
+
+    const tags = getReminderTagOptions();
+    let active = state.reminderTagFilter || REMINDER_TAG_ALL;
+    if (active !== REMINDER_TAG_ALL && active !== REMINDER_TAG_NONE && !tags.includes(active)) {
+        active = REMINDER_TAG_ALL;
+        state.reminderTagFilter = active;
+    }
+
+    const options = [
+        `<option value="${REMINDER_TAG_ALL}">Todas</option>`,
+        `<option value="${REMINDER_TAG_NONE}">Sin etiqueta</option>`,
+        ...tags.map((tag) => `<option value="${escapeHtml(tag)}">${escapeHtml(tag)}</option>`)
+    ];
+
+    select.innerHTML = options.join('');
+    select.value = active;
+    select.disabled = !state.reminders.length;
+}
+
 function renderReminders() {
     const list = document.getElementById('reminders-list');
     const pag = document.getElementById('reminders-pagination');
     if (!list || !pag) return;
+
+    renderReminderTagFilter();
+    renderNewReminderTagHelper();
 
     if (!state.reminders.length) {
         list.innerHTML = '<div class="ag-empty">No hay tareas pendientes</div>';
@@ -1016,16 +1195,33 @@ function renderReminders() {
         return;
     }
 
-    const totalPages = Math.max(1, Math.ceil(state.reminders.length / PAGE_SIZE));
+    const filteredReminders = state.reminders.filter((r) => {
+        const active = state.reminderTagFilter || REMINDER_TAG_ALL;
+        const tags = getReminderTagsFromRow(r);
+        if (active === REMINDER_TAG_ALL) return true;
+        if (active === REMINDER_TAG_NONE) return tags.length === 0;
+        return tags.includes(active);
+    });
+
+    if (!filteredReminders.length) {
+        list.innerHTML = '<div class="ag-empty">No hay tareas para esa etiqueta</div>';
+        pag.style.display = 'none';
+        return;
+    }
+
+    const totalPages = Math.max(1, Math.ceil(filteredReminders.length / PAGE_SIZE));
     if (state.page.reminders > totalPages) state.page.reminders = totalPages;
 
     const start = (state.page.reminders - 1) * PAGE_SIZE;
-    const chunk = state.reminders.slice(start, start + PAGE_SIZE);
+    const chunk = filteredReminders.slice(start, start + PAGE_SIZE);
 
     list.innerHTML = '';
     chunk.forEach((r) => {
         const due = r.dueDate ? new Date(r.dueDate) : null;
         const dateStr = due ? due.toLocaleDateString('es', { day: '2-digit', month: 'short' }) : '';
+        const tags = getReminderTagsFromRow(r);
+        const visibleTags = tags.slice(0, 2);
+        const hiddenCount = Math.max(0, tags.length - visibleTags.length);
 
         const row = document.createElement('div');
         row.className = `ag-item ${r.done ? 'ag-item-paid' : ''}`;
@@ -1035,6 +1231,8 @@ function renderReminders() {
             </button>
             <span class="ag-item-text">${escapeHtml(r.text)}</span>
             <div class="ag-item-meta">
+                ${visibleTags.map((tag) => `<span class="ag-tag-badge" title="${escapeHtml(tags.join(', '))}">🏷️ ${escapeHtml(tag)}</span>`).join('')}
+                ${hiddenCount > 0 ? `<span class="ag-tag-badge" title="${escapeHtml(tags.join(', '))}">+${hiddenCount}</span>` : ''}
                 ${dateStr ? `<span class="ag-badge">📅 ${dateStr}</span>` : ''}
                 <button class="ag-notes-btn ${r.notes ? 'has-notes' : ''}" onclick='openObsModal("agenda", ${r.id}, ${JSON.stringify(r.notes || '')})' title="Observaciones">📝</button>
                 <button class="ag-edit-btn" onclick='openEditModal("reminder", ${jsonStr(r)})'>✏️</button>
@@ -1069,13 +1267,17 @@ function renderPagination(container, page, totalPages, onChange) {
 
 async function addReminder() {
     const textEl = document.getElementById('new-reminder-input');
+    const tagEl = document.getElementById('new-reminder-tag');
     const dateEl = document.getElementById('new-reminder-date');
     const txt = (textEl?.value || '').trim();
+    const tag = tagsToCsv(parseReminderTags(tagEl?.value || ''));
     const date = dateEl?.value || '';
     if (!txt) return;
 
-    await py.add_agenda(txt, date);
+    await py.add_agenda(txt, date, tag);
     if (textEl) textEl.value = '';
+    if (tagEl) tagEl.value = '';
+    renderNewReminderTagHelper();
     notify('Tarea guardada', 'success');
     fetchReminders();
 }

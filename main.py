@@ -60,7 +60,7 @@ def _db():
     c.execute("CREATE TABLE IF NOT EXISTS screenshots(id INTEGER PRIMARY KEY, path TEXT, url TEXT, ts DATETIME DEFAULT CURRENT_TIMESTAMP)")
     
     # Tablas de Agenda y Compras
-    c.execute("CREATE TABLE IF NOT EXISTS agenda(id INTEGER PRIMARY KEY, text TEXT, dueDate TEXT, done INTEGER DEFAULT 0)")
+    c.execute("CREATE TABLE IF NOT EXISTS agenda(id INTEGER PRIMARY KEY, text TEXT, dueDate TEXT, done INTEGER DEFAULT 0, tag TEXT DEFAULT '')")
     c.execute("CREATE TABLE IF NOT EXISTS shopping(id INTEGER PRIMARY KEY, text TEXT, value REAL, currency TEXT, dueDate TEXT, paymentMethod TEXT, done INTEGER DEFAULT 0)")
     c.execute("CREATE TABLE IF NOT EXISTS income(id INTEGER PRIMARY KEY, text TEXT, value REAL, currency TEXT, dueDate TEXT, received INTEGER DEFAULT 0)")
     c.execute("CREATE TABLE IF NOT EXISTS kanban_cols(id INTEGER PRIMARY KEY, title TEXT, pos INTEGER)")
@@ -105,6 +105,8 @@ def _db():
     agenda_cols = {row[1] for row in c.execute("PRAGMA table_info(agenda)").fetchall()}
     if 'notes' not in agenda_cols:
         c.execute("ALTER TABLE agenda ADD COLUMN notes TEXT DEFAULT ''")
+    if 'tag' not in agenda_cols:
+        c.execute("ALTER TABLE agenda ADD COLUMN tag TEXT DEFAULT ''")
     shopping_cols = {row[1] for row in c.execute("PRAGMA table_info(shopping)").fetchall()}
     if 'notes' not in shopping_cols:
         c.execute("ALTER TABLE shopping ADD COLUMN notes TEXT DEFAULT ''")
@@ -711,17 +713,24 @@ class AgendaBridge(QObject):
 
     @pyqtSlot(result=list)
     def get_agenda(self):
-        c = _db(); res = c.execute("SELECT id, text, dueDate, done, COALESCE(notes,'') FROM agenda ORDER BY id DESC").fetchall(); c.close()
-        return [{"id":r[0],"text":r[1],"dueDate":r[2],"done":bool(r[3]),"notes":r[4]} for r in res]
+        c = _db(); res = c.execute("SELECT id, text, dueDate, done, COALESCE(notes,''), COALESCE(tag,'') FROM agenda ORDER BY id DESC").fetchall(); c.close()
+        return [{"id":r[0],"text":r[1],"dueDate":r[2],"done":bool(r[3]),"notes":r[4],"tag":r[5]} for r in res]
 
     @pyqtSlot(str, str)
-    def add_agenda(self, text, date):
-        c = _db(); c.execute("INSERT INTO agenda(text, dueDate) VALUES(?,?)", (text, date)); c.commit(); c.close()
+    @pyqtSlot(str, str, str)
+    def add_agenda(self, text, date, tag=''):
+        c = _db(); c.execute("INSERT INTO agenda(text, dueDate, tag) VALUES(?,?,?)", (text, date, (tag or '').strip())); c.commit(); c.close()
         self.updated.emit()
 
     @pyqtSlot(int, str, str)
-    def update_agenda(self, aid, text, date):
-        c = _db(); c.execute("UPDATE agenda SET text=?, dueDate=? WHERE id=?", (text, date, aid)); c.commit(); c.close()
+    @pyqtSlot(int, str, str, str)
+    def update_agenda(self, aid, text, date, tag=None):
+        c = _db()
+        if tag is None:
+            c.execute("UPDATE agenda SET text=?, dueDate=? WHERE id=?", (text, date, aid))
+        else:
+            c.execute("UPDATE agenda SET text=?, dueDate=?, tag=? WHERE id=?", (text, date, (tag or '').strip(), aid))
+        c.commit(); c.close()
         self.updated.emit()
 
     @pyqtSlot(int)
