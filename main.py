@@ -831,9 +831,11 @@ class AgendaBridge(QObject):
         return os.path.normpath(rel_path).replace("\\", "/")
 
     def _safe_media_path(self, rel_path):
-        base = os.path.abspath(self.get_media_path())
+        # Resolve the base media directory and target safely, allowing symlinks within the media path.
+        base = os.path.realpath(self.get_media_path())
         rel_norm = self._normalize_rel(rel_path)
-        target = os.path.abspath(os.path.join(base, rel_norm))
+        target = os.path.realpath(os.path.join(base, rel_norm))
+        # Ensure the resolved target is still inside the base directory.
         if os.path.commonpath([target, base]) != base:
             raise ValueError("Ruta fuera de la biblioteca")
         return target

@@ -829,6 +829,22 @@ async function moveVideo(filename, fromFolder, toFolder) {
  * Handle folder selection
  */
 async function selectFolder(path, element, autoPlay = true) {
+    // Asegurarnos de que el elemento existe; si no, buscarlo por su atributo data-path
+    if (!element) {
+        const possible = document.querySelector(`.folder-item[data-path="${path}"]`);
+        if (possible) element = possible;
+    }
+    // Si aún no existe, abortar para evitar errores
+    if (!element) {
+        console.warn(`No se encontró el elemento de carpeta para la ruta: ${path}`);
+        showNotification(`Carpeta "${path}" no encontrada`, 'error');
+        return;
+    }
+    document.querySelectorAll('.folder-item').forEach(el => el.classList.remove('active'));
+    element.classList.add('active');
+    currentFolderName.textContent = path;
+    videoList.innerHTML = '';
+
     document.querySelectorAll('.folder-item').forEach(el => el.classList.remove('active'));
     element.classList.add('active');
     currentFolderName.textContent = path;
