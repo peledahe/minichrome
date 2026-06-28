@@ -1022,8 +1022,8 @@ class AgendaBridge(QObject):
             op = self._safe_media_path(old_path)
             np = os.path.join(os.path.dirname(op), safe_name)
 
-            base = os.path.abspath(self.get_media_path())
-            np_abs = os.path.abspath(np)
+            base = os.path.realpath(self.get_media_path())
+            np_abs = os.path.realpath(np)
             if os.path.commonpath([np_abs, base]) != base:
                 return False
 
@@ -1108,8 +1108,8 @@ class AgendaBridge(QObject):
                 return False
 
             parent_abs = self._safe_media_path(parent_path)
-            new_folder = os.path.abspath(os.path.join(parent_abs, name))
-            base = os.path.abspath(self.get_media_path())
+            new_folder = os.path.realpath(os.path.join(parent_abs, name))
+            base = os.path.realpath(self.get_media_path())
             if os.path.commonpath([new_folder, base]) != base:
                 return False
 
@@ -1131,8 +1131,8 @@ class AgendaBridge(QObject):
 
             old_abs = self._safe_media_path(old_rel)
             parent_abs = os.path.dirname(old_abs)
-            new_abs = os.path.abspath(os.path.join(parent_abs, safe_name))
-            base = os.path.abspath(self.get_media_path())
+            new_abs = os.path.realpath(os.path.join(parent_abs, safe_name))
+            base = os.path.realpath(self.get_media_path())
             if os.path.commonpath([new_abs, base]) != base:
                 return False
 

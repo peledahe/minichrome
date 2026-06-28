@@ -129,7 +129,7 @@
         });
     }
 
-    function showNotification(msg, type = 'success') {
+    function showNotification(msg, type = 'success', sticky = false) {
         const container = q('toast-container');
         if (!container) return;
         const toast = document.createElement('div');
@@ -143,19 +143,38 @@
         toast.style.opacity = '0';
         toast.style.transform = 'translateY(20px)';
         toast.style.transition = 'all 0.3s ease';
-        toast.innerText = msg;
-        container.appendChild(toast);
+        toast.style.display = 'flex';
+        toast.style.alignItems = 'center';
+        toast.style.gap = '10px';
+
+        if (sticky) {
+            toast.innerHTML = `<span style="flex:1;">${msg}</span><button class="ip-close-toast" style="background:transparent;border:none;color:#fff;cursor:pointer;font-size:1.1rem;font-weight:bold;padding:0 0 0 5px;line-height:1;">&times;</button>`;
+            container.appendChild(toast);
+            const closeBtn = toast.querySelector('.ip-close-toast');
+            if (closeBtn) {
+                closeBtn.addEventListener('click', () => {
+                    toast.style.opacity = '0';
+                    toast.style.transform = 'translateY(20px)';
+                    setTimeout(() => toast.remove(), 300);
+                });
+            }
+        } else {
+            toast.innerText = msg;
+            container.appendChild(toast);
+        }
 
         setTimeout(() => {
             toast.style.opacity = '1';
             toast.style.transform = 'translateY(0)';
         }, 10);
 
-        setTimeout(() => {
-            toast.style.opacity = '0';
-            toast.style.transform = 'translateY(20px)';
-            setTimeout(() => toast.remove(), 300);
-        }, 3000);
+        if (!sticky) {
+            setTimeout(() => {
+                toast.style.opacity = '0';
+                toast.style.transform = 'translateY(20px)';
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
+        }
     }
 
     async function setConfig(key, val) {
@@ -796,7 +815,7 @@
 
                 q('ip-rename-modal').classList.remove('active');
                 renderLightbox();
-                showNotification('Imagen renombrada', 'success');
+                showNotification('Imagen renombrada', 'success', true);
             } catch (_e) {
                 showNotification('Error al renombrar', 'error');
             }
@@ -882,7 +901,7 @@
                 } else {
                     renderGallery();
                 }
-                showNotification('Imagen movida', 'success');
+                showNotification('Imagen movida', 'success', true);
             } catch (_e) {
                 showNotification('Error al mover imagen', 'error');
             }
@@ -962,7 +981,7 @@
                 if (!ok) throw new Error('No se pudo crear');
                 q('ip-folder-modal').classList.remove('active');
                 await fetchFolders();
-                showNotification('Carpeta creada', 'success');
+                showNotification('Carpeta creada', 'success', true);
             } catch (_e) {
                 showNotification('Error al crear carpeta', 'error');
             }
@@ -1004,7 +1023,7 @@
                 }
 
                 await fetchFolders();
-                showNotification('Carpeta renombrada', 'success');
+                showNotification('Carpeta renombrada', 'success', true);
             } catch (_e) {
                 showNotification('Error al renombrar carpeta', 'error');
             }
@@ -1109,7 +1128,7 @@
             }
 
             await fetchFolders();
-            showNotification('Carpeta de imagenes guardada', 'success');
+            showNotification('Carpeta de imagenes guardada', 'success', true);
         } catch (_e) {
             showNotification('Error al guardar carpeta', 'error');
         }

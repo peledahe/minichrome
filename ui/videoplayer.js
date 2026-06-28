@@ -400,7 +400,7 @@ saveSettingsBtn.addEventListener('click', async () => {
 
     resetPlayer(); // Limpiar el reproductor al cambiar de biblioteca
     settingsModal.style.display = 'none';
-    showNotification('Biblioteca reiniciada', 'info');
+    showNotification('Biblioteca reiniciada', 'info', true);
 });
 
 function resetPlayer() {
@@ -635,7 +635,7 @@ async function resolveAndAddUrl() {
             renderVideos(currentVideos);
         }
 
-        // showNotification(`Video añadido: ${item.name}`, 'success', true);
+        showNotification(`Video añadido: ${item.name}`, 'success', true);
     } catch (e) {
         showNotification(e.message || 'Error al analizar URL', 'error');
     } finally {
@@ -658,7 +658,7 @@ async function saveCloudPlaylistsToServer() {
     try {
         await py.set_playlists(JSON.stringify(cloudPlaylists));
         // Notificación sticky para guardado
-        // showNotification('Listas actualizadas y guardadas correctamente', 'success', true);
+        showNotification('Listas actualizadas y guardadas correctamente', 'success', true);
         renderCloudPlaylists();
         cloudModal.classList.remove('active');
     } catch (e) {
@@ -816,6 +816,7 @@ async function moveVideo(filename, fromFolder, toFolder) {
                     currentIndex = currentVideos.findIndex(v => v.name === currentPlaying.name);
                     updateActiveState(currentIndex);
                 }
+                showNotification(`Video "${filename}" movido correctamente`, 'success', true);
             }
         } else {
             showNotification(data.error || 'Error al mover el archivo', 'error');
@@ -1095,7 +1096,7 @@ async function renameVideoAsync(oldName, newName) {
                 // Playback migration can be done in python, or simply skipped for tags sync
             }
 
-            // showNotification(`Renombrado a "${newName}"`, 'success', true);
+            showNotification(`Renombrado a "${newName}"`, 'success', true);
             return true;
         } else {
             showNotification(data.error || 'Error al renombrar', 'error');
@@ -1726,13 +1727,16 @@ async function handleCreateFolder(parentPath) {
     input.focus();
     input.select();
 
+    let finished = false;
     const finish = async () => {
+        if (finished) return;
+        finished = true;
         const folderName = input.value.trim();
         if (folderName) {
             try {
                 const success = await py.create_folder(parentPath || '.', folderName);
                 if (success) {
-                    // showNotification(`Carpeta "${folderName}" creada`, 'success', true);
+                    showNotification(`Carpeta "${folderName}" creada`, 'success', true);
                 } else {
                     showNotification('Error al crear', 'error');
                 }
@@ -2321,7 +2325,7 @@ async function renameFolderAsync(oldPath, newName) {
     try {
         const success = await py.rename_folder(oldPath, newName);
         if (success) {
-            // showNotification(`Carpeta renombrada a "${newName}"`, 'success', true);
+            showNotification(`Carpeta renombrada a "${newName}"`, 'success', true);
             return true;
         } else {
             showNotification('Error al renombrar carpeta', 'error');
