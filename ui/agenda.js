@@ -2682,6 +2682,7 @@ function noteBringToFront(noteEl, id) {
 
 function noteStartDrag(e) {
     if (e.button !== 0) return;
+    if (e.target.closest('.note-delete') || e.target.closest('.note-color-dot')) return;
     const noteEl = e.currentTarget.closest('.sticky-note');
     if (!noteEl) return;
     e.preventDefault();
