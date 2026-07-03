@@ -103,7 +103,7 @@ async function initApp() {
 
     await loadAppConfig();
 
-    const preferredTab = localStorage.getItem('lastAgendaTab') || 'agenda';
+    const preferredTab = localStorage.getItem('lastAgendaTab') || 'notes';
     activateTab(preferredTab);
 }
 
@@ -114,6 +114,26 @@ function bindStaticEvents() {
 
     const cfgBtn = document.getElementById('btn-config');
     if (cfgBtn) cfgBtn.onclick = () => activateTab('config');
+
+    const openNewModalBtn = document.getElementById('open-new-reminder-modal-btn');
+    const newModal = document.getElementById('new-reminder-modal');
+    if (openNewModalBtn && newModal) {
+        openNewModalBtn.onclick = () => {
+            const txtInput = document.getElementById('new-reminder-input');
+            const tagInput = document.getElementById('new-reminder-tag');
+            const dateInput = document.getElementById('new-reminder-date');
+            if (txtInput) txtInput.value = '';
+            if (tagInput) tagInput.value = '';
+            if (dateInput) dateInput.value = '';
+            renderNewReminderTagHelper();
+            newModal.classList.add('active');
+        };
+    }
+
+    const cancelNewModalBtn = document.getElementById('new-reminder-cancel-btn');
+    if (cancelNewModalBtn && newModal) {
+        cancelNewModalBtn.onclick = () => newModal.classList.remove('active');
+    }
 
     const addReminderBtn = document.getElementById('add-reminder-btn');
     if (addReminderBtn) addReminderBtn.onclick = addReminder;
@@ -138,6 +158,34 @@ function bindStaticEvents() {
 
     const addIncomeBtn = document.getElementById('add-income-btn');
     if (addIncomeBtn) addIncomeBtn.onclick = addIncome;
+
+    const openNewShopModalBtn = document.getElementById('open-new-shop-modal-btn');
+    if (openNewShopModalBtn) {
+        openNewShopModalBtn.onclick = () => {
+            document.getElementById('new-shop-modal').classList.add('active');
+            document.getElementById('shop-item-input')?.focus();
+        };
+    }
+    const newShopCancelBtn = document.getElementById('new-shop-cancel-btn');
+    if (newShopCancelBtn) {
+        newShopCancelBtn.onclick = () => {
+            document.getElementById('new-shop-modal').classList.remove('active');
+        };
+    }
+
+    const openNewIncomeModalBtn = document.getElementById('open-new-income-modal-btn');
+    if (openNewIncomeModalBtn) {
+        openNewIncomeModalBtn.onclick = () => {
+            document.getElementById('new-income-modal').classList.add('active');
+            document.getElementById('income-item-input')?.focus();
+        };
+    }
+    const newIncomeCancelBtn = document.getElementById('new-income-cancel-btn');
+    if (newIncomeCancelBtn) {
+        newIncomeCancelBtn.onclick = () => {
+            document.getElementById('new-income-modal').classList.remove('active');
+        };
+    }
 
     const notesNewBtn = document.getElementById('notes-new-btn');
     if (notesNewBtn) notesNewBtn.onclick = addNote;
@@ -450,6 +498,18 @@ function bindKanbanEvents() {
             e.preventDefault();
         });
     });
+
+    const boldBtn = document.getElementById('kb-tool-bold');
+    const italicBtn = document.getElementById('kb-tool-italic');
+    const codeBtn = document.getElementById('kb-tool-code');
+    const linkBtn = document.getElementById('kb-link-tool-btn');
+    const listBtn = document.getElementById('kb-tool-list');
+
+    if (boldBtn) boldBtn.addEventListener('click', () => kbApplyFormat('bold'));
+    if (italicBtn) italicBtn.addEventListener('click', () => kbApplyFormat('italic'));
+    if (codeBtn) codeBtn.addEventListener('click', () => kbApplyFormat('code'));
+    if (linkBtn) linkBtn.addEventListener('click', () => kbApplyFormat('link'));
+    if (listBtn) listBtn.addEventListener('click', () => kbApplyFormat('list'));
 
     if (kbLinkInsertBtn) kbLinkInsertBtn.onclick = kbInsertLinkFromPopover;
     if (kbLinkCancelBtn) kbLinkCancelBtn.onclick = kbCloseLinkPopover;
@@ -1278,6 +1338,10 @@ async function addReminder() {
     if (textEl) textEl.value = '';
     if (tagEl) tagEl.value = '';
     renderNewReminderTagHelper();
+    
+    const newModal = document.getElementById('new-reminder-modal');
+    if (newModal) newModal.classList.remove('active');
+
     notify('Tarea guardada', 'success');
     fetchReminders();
 }
@@ -1468,6 +1532,11 @@ async function addShopping() {
 
     document.getElementById('shop-item-input').value = '';
     document.getElementById('shop-value-input').value = '';
+    if (document.getElementById('shop-payment-method-select')) document.getElementById('shop-payment-method-select').value = '';
+    if (document.getElementById('shop-date-input')) document.getElementById('shop-date-input').value = '';
+
+    document.getElementById('new-shop-modal')?.classList.remove('active');
+
     notify('Gasto registrado', 'success');
     fetchShoppingList();
 }
@@ -1552,6 +1621,10 @@ async function addIncome() {
     await py.add_income(text, val, cur, date);
     document.getElementById('income-item-input').value = '';
     document.getElementById('income-value-input').value = '';
+    if (document.getElementById('income-date-input')) document.getElementById('income-date-input').value = '';
+
+    document.getElementById('new-income-modal')?.classList.remove('active');
+
     notify('Ingreso registrado', 'success');
     fetchIncomeList();
 }
@@ -2195,9 +2268,7 @@ async function fetchKanban() {
                 : '';
             
             return `
-            <div class="kb-card ${dueLiClass}" draggable="true" data-id="${card.id}"
-                 ondragstart="kbDragStart(event, ${card.id})"
-                 ondragend="kbDragEnd(event)">
+            <div class="kb-card ${dueLiClass}" draggable="true" data-id="${card.id}">
                 <div class="kb-card-top">
                     <div class="kb-card-top-left">
                         <span class="kb-card-id">#${escapeHtml(shortId || '------')}</span>
@@ -2219,6 +2290,17 @@ async function fetchKanban() {
                 </div>
             </div>`;
         }).join('');
+
+        // Vincular eventos drag de forma dinámica
+        container.querySelectorAll('.kb-card').forEach((cardEl) => {
+            cardEl.addEventListener('dragstart', (e) => {
+                const id = parseInt(cardEl.dataset.id);
+                kbDragStart(e, id);
+            });
+            cardEl.addEventListener('dragend', (e) => {
+                kbDragEnd(e);
+            });
+        });
     }
 }
 

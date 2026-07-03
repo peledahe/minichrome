@@ -158,6 +158,14 @@
                     setTimeout(() => toast.remove(), 300);
                 });
             }
+            // Auto-descartar después de 6 segundos
+            setTimeout(() => {
+                if (toast.parentNode) {
+                    toast.style.opacity = '0';
+                    toast.style.transform = 'translateY(20px)';
+                    setTimeout(() => toast.remove(), 300);
+                }
+            }, 6000);
         } else {
             toast.innerText = msg;
             container.appendChild(toast);

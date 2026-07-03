@@ -973,11 +973,14 @@
             color: rgba(255,255,255,0.38);
             line-height: 1.4;
             margin-bottom: 8px;
-            display: -webkit-box;
-            line-clamp: 2;
-            -webkit-line-clamp: 2;
-            -webkit-box-orient: vertical;
-            overflow: hidden;
+        }
+        .kb-card-desc ul, .kb-card-desc ol {
+            padding-left: 16px;
+            margin: 4px 0;
+            list-style-position: outside;
+        }
+        .kb-card-desc li {
+            margin-bottom: 2px;
         }
         .kb-card-desc strong { color: rgba(255,255,255,0.92); font-weight: 700; }
         .kb-card-desc em { color: rgba(255,255,255,0.78); font-style: italic; }
@@ -2178,11 +2181,11 @@
     <!-- HEADER -->
     <div class="ag-header">
         <div class="ag-tabs">
-            <button class="ag-tab active" data-tab="agenda">Agenda</button>
+            <button class="ag-tab active" data-tab="notes">Notas</button>
+            <button class="ag-tab" data-tab="kanban">Kanban</button>
+            <button class="ag-tab" data-tab="agenda">Agenda</button>
             <button class="ag-tab" data-tab="shopping">Compras</button>
             <button class="ag-tab" data-tab="income">Ingresos</button>
-            <button class="ag-tab" data-tab="kanban">Kanban</button>
-            <button class="ag-tab" data-tab="notes">Notas</button>
             <button class="ag-tab" data-tab="passwords">Claves</button>
         </div>
 
@@ -2205,28 +2208,22 @@
 
         <!-- ===== AGENDA VIEW ===== -->
         <div id="view-agenda" class="ag-view active">
-            <div class="section-header">
-                <h1><div id="main-calendar-icon"></div> Mi Agenda</h1>
-                <p>Gestión de tareas y recordatorios</p>
-            </div>
-            <div class="input-row">
-                <input type="text" id="new-reminder-input" class="ag-input ag-input-main" placeholder="Nueva tarea o recordatorio...">
-                <button class="ag-btn ag-btn-ghost" id="paste-reminder" title="Pegar del portapapeles">📋</button>
-                <input type="text" id="new-reminder-tag" class="ag-input ag-input-tag" placeholder="Etiquetas (coma separadas)">
-                <input type="date" id="new-reminder-date" class="ag-input ag-input-md" title="Fecha límite">
-                <button class="ag-btn ag-btn-primary" id="add-reminder-btn">Añadir</button>
-            </div>
-            <div class="agenda-tags-helper">
-                <p class="agenda-tags-helper-title">Etiquetas de la tarea nueva:</p>
-                <div id="new-reminder-tag-current" class="agenda-tag-chip-list"></div>
-                <p class="agenda-tags-helper-title">Etiquetas existentes (clic para añadir):</p>
-                <div id="new-reminder-tag-available" class="agenda-tag-chip-list"></div>
-            </div>
-            <div class="agenda-filter-row">
-                <label for="reminder-tag-filter" class="agenda-filter-label">Filtrar por etiqueta:</label>
-                <select id="reminder-tag-filter" class="ag-input agenda-filter-select">
-                    <option value="__all__">Todas</option>
-                </select>
+            <div class="section-header" style="display:flex; justify-content:space-between; align-items:flex-start;">
+                <div style="display:flex; align-items:center; gap:16px;">
+                    <div>
+                        <h1><div id="main-calendar-icon"></div> Mi Agenda</h1>
+                        <p>Gestión de tareas y recordatorios</p>
+                    </div>
+                    <button class="ag-btn ag-btn-primary" id="open-new-reminder-modal-btn" style="padding: 8px 16px; font-weight: 600; border-radius: 8px;">Nuevo +</button>
+                </div>
+                <div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap;">
+                    <div class="agenda-filter-row" style="margin:0; display:flex; align-items:center; gap:8px;">
+                        <label for="reminder-tag-filter" class="agenda-filter-label">Filtrar por etiqueta:</label>
+                        <select id="reminder-tag-filter" class="ag-input agenda-filter-select" style="margin:0; flex:0 0 160px; max-width:160px; padding:6px 10px; height:auto;">
+                            <option value="__all__">Todas</option>
+                        </select>
+                    </div>
+                </div>
             </div>
             <div id="reminders-list" class="ag-list">
                 <div class="ag-empty">Cargando tareas...</div>
@@ -2237,11 +2234,12 @@
         <!-- ===== SHOPPING VIEW ===== -->
         <div id="view-shopping" class="ag-view">
             <div class="section-header" style="display:flex; justify-content:space-between; align-items:flex-start;">
-                <div style="display:flex; align-items:center; gap:8px;">
+                <div style="display:flex; align-items:center; gap:16px;">
                     <div>
                         <h1>🛒 Compras y Pagos <button class="ag-settings-btn" id="btn-payment-methods" title="Administrar medios de pago">⚙️</button></h1>
                         <p>Control de gastos, facturas y deudas</p>
                     </div>
+                    <button class="ag-btn ag-btn-primary" id="open-new-shop-modal-btn" style="padding: 8px 16px; font-weight: 600; border-radius: 8px;">Nuevo +</button>
                 </div>
                 <div class="shop-totals">
                     <div class="shop-totals-col">
@@ -2266,20 +2264,6 @@
                     </div>
                 </div>
             </div>
-            <div class="input-row">
-                <input type="text" id="shop-item-input" class="ag-input ag-input-main" placeholder="¿Qué hay que comprar o pagar?">
-                <button class="ag-btn ag-btn-ghost" id="paste-shop-item" title="Pegar del portapapeles">📋</button>
-                <select id="shop-currency-select" class="ag-input ag-input-sm">
-                    <option value="Q">GTQ (Q)</option>
-                    <option value="$">USD ($)</option>
-                </select>
-                <input type="number" id="shop-value-input" class="ag-input ag-input-num" placeholder="Monto" step="0.01" min="0">
-                <select id="shop-payment-method-select" class="ag-input ag-input-sm">
-                    <option value="">Sin asignar</option>
-                </select>
-                <input type="date" id="shop-date-input" class="ag-input ag-input-md" title="Fecha límite">
-                <button class="ag-btn ag-btn-primary" id="add-shop-btn">Añadir</button>
-            </div>
             <!-- Payment method summary -->
             <div id="payment-summary" class="payment-summary" style="display:none;"></div>
             <div id="shopping-list" class="ag-list">
@@ -2291,9 +2275,12 @@
         <!-- ===== INCOME VIEW ===== -->
         <div id="view-income" class="ag-view">
             <div class="section-header" style="display:flex; justify-content:space-between; align-items:flex-start;">
-                <div>
-                    <h1>💰 Ingresos</h1>
-                    <p>Registro de entradas y cobros</p>
+                <div style="display:flex; align-items:center; gap:16px;">
+                    <div>
+                        <h1>💰 Ingresos</h1>
+                        <p>Registro de entradas y cobros</p>
+                    </div>
+                    <button class="ag-btn ag-btn-income" id="open-new-income-modal-btn" style="padding: 8px 16px; font-weight: 600; border-radius: 8px;">Nuevo +</button>
                 </div>
                 <div class="shop-totals income-totals-mini">
                     <div class="shop-totals-col">
@@ -2304,16 +2291,6 @@
                         </div>
                     </div>
                 </div>
-            </div>
-            <div class="input-row">
-                <input type="text" id="income-item-input" class="ag-input ag-input-main" placeholder="¿Cuál es el ingreso?">
-                <select id="income-currency-select" class="ag-input ag-input-sm">
-                    <option value="Q">GTQ (Q)</option>
-                    <option value="$">USD ($)</option>
-                </select>
-                <input type="number" id="income-value-input" class="ag-input ag-input-num" placeholder="Monto" step="0.01" min="0">
-                <input type="date" id="income-date-input" class="ag-input ag-input-md" title="Fecha">
-                <button class="ag-btn ag-btn-income" id="add-income-btn">Añadir</button>
             </div>
             <div id="income-list" class="ag-list">
                 <div class="ag-empty">Cargando ingresos...</div>
@@ -2421,21 +2398,21 @@
                 <div class="cfg-module-grid">
                 <div class="cfg-row">
                     <div class="cfg-row-label">
-                        <span>Módulo de Video</span>
-                        <small>Muestra el acceso al reproductor de video en la agenda y el navegador</small>
+                        <span>Notas Adhesivas</span>
+                        <small>Muestra la pestaña de Notas en la agenda</small>
                     </div>
                     <label class="cfg-toggle">
-                        <input type="checkbox" id="cfg-video-enabled" checked>
+                        <input type="checkbox" id="cfg-notes-enabled" checked>
                         <span class="cfg-toggle-track"></span>
                     </label>
                 </div>
                 <div class="cfg-row">
                     <div class="cfg-row-label">
-                        <span>Visor de Imágenes</span>
-                        <small>Muestra el acceso al visor de imágenes en todas las ventanas</small>
+                        <span>Kanban</span>
+                        <small>Muestra la pestaña de Kanban en la agenda</small>
                     </div>
                     <label class="cfg-toggle">
-                        <input type="checkbox" id="cfg-images-enabled" checked>
+                        <input type="checkbox" id="cfg-kanban-enabled" checked>
                         <span class="cfg-toggle-track"></span>
                     </label>
                 </div>
@@ -2461,21 +2438,21 @@
                 </div>
                 <div class="cfg-row">
                     <div class="cfg-row-label">
-                        <span>Kanban</span>
-                        <small>Muestra la pestaña de Kanban en la agenda</small>
+                        <span>Módulo de Video</span>
+                        <small>Muestra el acceso al reproductor de video en la agenda y el navegador</small>
                     </div>
                     <label class="cfg-toggle">
-                        <input type="checkbox" id="cfg-kanban-enabled" checked>
+                        <input type="checkbox" id="cfg-video-enabled" checked>
                         <span class="cfg-toggle-track"></span>
                     </label>
                 </div>
                 <div class="cfg-row">
                     <div class="cfg-row-label">
-                        <span>Notas Adhesivas</span>
-                        <small>Muestra la pestaña de Notas en la agenda</small>
+                        <span>Visor de Imágenes</span>
+                        <small>Muestra el acceso al visor de imágenes en todas las ventanas</small>
                     </div>
                     <label class="cfg-toggle">
-                        <input type="checkbox" id="cfg-notes-enabled" checked>
+                        <input type="checkbox" id="cfg-images-enabled" checked>
                         <span class="cfg-toggle-track"></span>
                     </label>
                 </div>
@@ -2637,7 +2614,87 @@
             </div>
         </div>
 
+    <!-- MODAL NUEVA COMPRA -->
+    <div class="edit-modal-overlay" id="new-shop-modal">
+        <div class="edit-modal-box">
+            <h3>🛒 Nueva Compra / Pago</h3>
+            <div class="edit-modal-row">
+                <input type="text" id="shop-item-input" class="ag-input" style="flex:1;" placeholder="¿Qué hay que comprar o pagar?">
+                <button class="ag-btn ag-btn-ghost" id="paste-shop-item" title="Pegar del portapapeles">📋</button>
+            </div>
+            <div class="edit-modal-row">
+                <select id="shop-currency-select" class="ag-input ag-input-sm" style="flex:0 0 100px;">
+                    <option value="Q">GTQ (Q)</option>
+                    <option value="$">USD ($)</option>
+                </select>
+                <input type="number" id="shop-value-input" class="ag-input" style="flex:1;" placeholder="Monto" step="0.01" min="0">
+            </div>
+            <div class="edit-modal-row">
+                <select id="shop-payment-method-select" class="ag-input" style="flex:1;">
+                    <option value="">Sin asignar (Medio de Pago)</option>
+                </select>
+            </div>
+            <div class="edit-modal-row">
+                <input type="date" id="shop-date-input" class="ag-input" style="flex:1;" title="Fecha límite">
+            </div>
+            <div class="edit-modal-actions">
+                <button class="ag-btn ag-btn-ghost" id="new-shop-cancel-btn">Cancelar</button>
+                <button class="ag-btn ag-btn-primary" id="add-shop-btn">Añadir</button>
+            </div>
+        </div>
     </div>
+
+    <!-- MODAL NUEVO INGRESO -->
+    <div class="edit-modal-overlay" id="new-income-modal">
+        <div class="edit-modal-box">
+            <h3>💰 Nuevo Ingreso</h3>
+            <div class="edit-modal-row">
+                <input type="text" id="income-item-input" class="ag-input" style="flex:1;" placeholder="¿Cuál es el ingreso?">
+            </div>
+            <div class="edit-modal-row">
+                <select id="income-currency-select" class="ag-input ag-input-sm" style="flex:0 0 100px;">
+                    <option value="Q">GTQ (Q)</option>
+                    <option value="$">USD ($)</option>
+                </select>
+                <input type="number" id="income-value-input" class="ag-input" style="flex:1;" placeholder="Monto" step="0.01" min="0">
+            </div>
+            <div class="edit-modal-row">
+                <input type="date" id="income-date-input" class="ag-input" style="flex:1;" title="Fecha">
+            </div>
+            <div class="edit-modal-actions">
+                <button class="ag-btn ag-btn-ghost" id="new-income-cancel-btn">Cancelar</button>
+                <button class="ag-btn ag-btn-income" id="add-income-btn" style="background:#2ed573; color:#fff;">Añadir</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL NUEVA TAREA / RECORDATORIO -->
+    <div class="edit-modal-overlay" id="new-reminder-modal">
+        <div class="edit-modal-box" style="max-height: 85vh; overflow-y: auto;">
+            <h3>➕ Nuevo Recordatorio</h3>
+            <div class="edit-modal-row">
+                <input type="text" id="new-reminder-input" class="ag-input" style="flex:1;" placeholder="Nueva tarea o recordatorio...">
+                <button class="ag-btn ag-btn-ghost" id="paste-reminder" title="Pegar del portapapeles">📋</button>
+            </div>
+            <div class="edit-modal-row">
+                <input type="date" id="new-reminder-date" class="ag-input" style="flex:1;" title="Fecha límite">
+            </div>
+            <div class="edit-modal-row">
+                <input type="text" id="new-reminder-tag" class="ag-input" style="flex:1;" placeholder="Etiquetas (coma separadas)">
+            </div>
+            <div class="agenda-tags-helper" style="margin-top: 8px;">
+                <p class="agenda-tags-helper-title">Etiquetas de la tarea nueva:</p>
+                <div id="new-reminder-tag-current" class="agenda-tag-chip-list"></div>
+                <p class="agenda-tags-helper-title">Etiquetas existentes (clic para añadir):</p>
+                <div id="new-reminder-tag-available" class="agenda-tag-chip-list"></div>
+            </div>
+            <div class="edit-modal-actions">
+                <button class="ag-btn ag-btn-ghost" id="new-reminder-cancel-btn">Cancelar</button>
+                <button class="ag-btn ag-btn-primary" id="add-reminder-btn">Añadir</button>
+            </div>
+        </div>
+    </div>
+
     <div class="edit-modal-overlay" id="edit-modal">
         <div class="edit-modal-box">
             <h3 id="edit-modal-title">Editar</h3>
@@ -2703,19 +2760,19 @@
 
             <input type="text" id="kb-card-title" class="ag-input" placeholder="Título de la tarjeta *">
             <div class="kb-desc-toolbar">
-                <button type="button" class="kb-desc-tool" id="kb-tool-bold" onclick="kbApplyFormat('bold')" title="Negrita" aria-label="Negrita">
+                <button type="button" class="kb-desc-tool" id="kb-tool-bold" title="Negrita" aria-label="Negrita">
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15.6 10.79A4.21 4.21 0 0 0 12.4 3H6v18h7.2a4.8 4.8 0 0 0 2.4-9.21zM9 6h3.4a1.4 1.4 0 0 1 0 2.8H9V6zm4.2 12H9v-3.6h4.2a1.8 1.8 0 0 1 0 3.6z"/></svg>
                 </button>
-                <button type="button" class="kb-desc-tool" id="kb-tool-italic" onclick="kbApplyFormat('italic')" title="Cursiva" aria-label="Cursiva">
+                <button type="button" class="kb-desc-tool" id="kb-tool-italic" title="Cursiva" aria-label="Cursiva">
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 4v3h2.21l-3.42 10H6v3h8v-3h-2.21l3.42-10H18V4z"/></svg>
                 </button>
-                <button type="button" class="kb-desc-tool" id="kb-tool-code" onclick="kbApplyFormat('code')" title="Código" aria-label="Código">
+                <button type="button" class="kb-desc-tool" id="kb-tool-code" title="Código" aria-label="Código">
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8.59 16.59 4 12l4.59-4.59L10 8.82 6.83 12 10 15.18zm6.82 0L14 15.18 17.17 12 14 8.82l1.41-1.41L20 12zm-6.98 3.12L11.17 4l2.24.4-2.74 15.71z"/></svg>
                 </button>
-                <button type="button" class="kb-desc-tool" id="kb-link-tool-btn" onclick="kbApplyFormat('link')" title="Agregar enlace" aria-label="Agregar enlace">
+                <button type="button" class="kb-desc-tool" id="kb-link-tool-btn" title="Agregar enlace" aria-label="Agregar enlace">
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.9 12a5 5 0 0 1 1.46-3.54l2.1-2.1a5 5 0 0 1 7.07 7.07l-1.4 1.4-1.42-1.42 1.4-1.4a3 3 0 1 0-4.24-4.24l-2.1 2.1a3 3 0 0 0 4.24 4.24l.35-.35 1.41 1.42-.35.35A5 5 0 0 1 3.9 12zm6.2 5.95 1.4-1.4 1.42 1.42-1.4 1.4a5 5 0 0 1-7.07-7.07l.35-.35 1.41 1.42-.35.35a3 3 0 0 0 4.24 4.24zm3.19-8.48 1.42 1.42-4.24 4.24-1.42-1.42z"/></svg>
                 </button>
-                <button type="button" class="kb-desc-tool" id="kb-tool-list" onclick="kbApplyFormat('list')" title="Lista" aria-label="Lista">
+                <button type="button" class="kb-desc-tool" id="kb-tool-list" title="Lista" aria-label="Lista">
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h14v2H7zm0 6h14v2H7zm0 6h14v2H7zM3 6.5A1.5 1.5 0 1 0 3 3.5a1.5 1.5 0 0 0 0 3zm0 6A1.5 1.5 0 1 0 3 9.5a1.5 1.5 0 0 0 0 3zm0 6A1.5 1.5 0 1 0 3 15.5a1.5 1.5 0 0 0 0 3z"/></svg>
                 </button>
             </div>
@@ -2880,9 +2937,10 @@
         // Funciones globales UI
         window.showToast = (msg, type = 'success') => {
             const container = document.getElementById('toast-container');
+            if (!container) return;
             const toast = document.createElement('div');
             toast.style.padding = '10px 20px';
-            toast.style.background = type === 'success' ? 'rgba(0,184,148,0.9)' : 'rgba(108,92,231,0.9)';
+            toast.style.background = type === 'success' ? 'rgba(0,184,148,0.95)' : 'rgba(108,92,231,0.95)';
             toast.style.color = '#fff';
             toast.style.borderRadius = '8px';
             toast.style.boxShadow = '0 4px 12px rgba(0,0,0,0.3)';
@@ -2890,15 +2948,51 @@
             toast.style.opacity = '0';
             toast.style.transform = 'translateY(20px)';
             toast.style.transition = 'all 0.3s ease';
-            toast.innerText = msg;
+            toast.style.display = 'flex';
+            toast.style.alignItems = 'center';
+            toast.style.justifyContent = 'space-between';
+            toast.style.gap = '16px';
+            
+            const textSpan = document.createElement('span');
+            textSpan.innerText = msg;
+            toast.appendChild(textSpan);
+            
+            const isSticky = (type === 'success');
+            if (isSticky) {
+                const closeBtn = document.createElement('button');
+                closeBtn.innerText = '✕';
+                closeBtn.style.background = 'none';
+                closeBtn.style.border = 'none';
+                closeBtn.style.color = '#fff';
+                closeBtn.style.cursor = 'pointer';
+                closeBtn.style.fontSize = '0.85rem';
+                closeBtn.style.padding = '2px';
+                closeBtn.style.opacity = '0.7';
+                closeBtn.style.transition = 'opacity 0.2s';
+                closeBtn.style.fontWeight = 'bold';
+                
+                closeBtn.addEventListener('mouseenter', () => { closeBtn.style.opacity = '1'; });
+                closeBtn.addEventListener('mouseleave', () => { closeBtn.style.opacity = '0.7'; });
+                closeBtn.onclick = (e) => {
+                    e.stopPropagation();
+                    toast.style.opacity = '0';
+                    toast.style.transform = 'translateY(20px)';
+                    setTimeout(() => toast.remove(), 300);
+                };
+                toast.appendChild(closeBtn);
+            }
+            
             container.appendChild(toast);
             
             setTimeout(() => { toast.style.opacity = '1'; toast.style.transform = 'translateY(0)'; }, 10);
+            const duration = isSticky ? 6000 : 3000;
             setTimeout(() => {
-                toast.style.opacity = '0';
-                toast.style.transform = 'translateY(20px)';
-                setTimeout(() => toast.remove(), 300);
-            }, 3000);
+                if (toast.parentNode) {
+                    toast.style.opacity = '0';
+                    toast.style.transform = 'translateY(20px)';
+                    setTimeout(() => toast.remove(), 300);
+                }
+            }, duration);
         };
 
         window.showConfirm = (msg, callback) => {
