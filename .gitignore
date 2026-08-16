@@ -3,3 +3,9 @@
 /browser_data.db
 /memory_screenshots
 /web_cache
+/.venv/
+
+# IA Context
+/.agents
+/.clinerules
+/deploy.sh
