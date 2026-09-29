@@ -29,6 +29,16 @@ DB    = os.path.join(BASE, "browser_data.db")
 LINKS_FILE    = os.path.join(BASE, "quick_links.json")
 SETTINGS_FILE = os.path.join(BASE, "settings.json")
 HOME  = f"file://{os.path.join(BASE, 'ui', 'newtab.html')}"
+UI_DIR = os.path.join(BASE, "ui")
+
+
+def is_internal_url(url) -> bool:
+    """True solo para páginas propias de la app (file://…/ui/*)."""
+    qurl = url if isinstance(url, QUrl) else QUrl(str(url or ""))
+    if not qurl.isLocalFile():
+        return False
+    path = os.path.realpath(qurl.toLocalFile())
+    return path.startswith(os.path.realpath(UI_DIR) + os.sep)
 os.makedirs(CACHE, exist_ok=True)
 os.makedirs(SCREENSHOTS_DIR, exist_ok=True)
 
@@ -1883,6 +1893,39 @@ class WebPage(QWebEnginePage):
         self._last_pwd_prompt_ts = 0.0
         self._last_autofill_host = ""
         self._last_autofill_ts = 0.0
+        self._bridges: dict[str, QObject] = {}
+        self._bridges_published = False
+        self.urlChanged.connect(self._sync_bridges)
+        self.loadFinished.connect(lambda _ok: self._sync_bridges(self.url()))
+
+    # ── Bridges py/pw solo para páginas internas ──────────────────────────────
+    def set_internal_bridges(self, channel, bridges: dict):
+        """El canal queda fijo; los objetos solo se publican en páginas internas."""
+        self._bridges = bridges
+        self.setWebChannel(channel)
+        self._sync_bridges(self.url())
+
+    def _sync_bridges(self, url, allow_register=True):
+        channel = self.webChannel()
+        if channel is None:
+            return
+        internal = is_internal_url(url)
+        if not internal and self._bridges_published:
+            for obj in self._bridges.values():
+                channel.deregisterObject(obj)
+            self._bridges_published = False
+        elif internal and allow_register and not self._bridges_published:
+            for name, obj in self._bridges.items():
+                channel.registerObject(name, obj)
+            self._bridges_published = True
+
+    def acceptNavigationRequest(self, url, nav_type, is_main_frame):
+        # Retira los bridges antes de salir hacia un sitio externo; el registro
+        # solo ocurre al confirmarse la URL interna (urlChanged), cuando el
+        # documento externo anterior ya no existe.
+        if is_main_frame:
+            self._sync_bridges(url, allow_register=False)
+        return super().acceptNavigationRequest(url, nav_type, is_main_frame)
 
     def _normalized_host(self, value: str) -> str:
         raw = (value or "").strip().lower()
@@ -2155,12 +2198,17 @@ class WebPage(QWebEnginePage):
         return choice['value']
 
     def javaScriptConsoleMessage(self, level, message, line, source):
+        # Cualquier sitio puede escribir en consola: el origen se toma de la URL
+        # real de la pestaña, nunca de los datos que envía la página.
+        page_url = self.url()
         if message.startswith("MINICHROME_LINKS:"):
-            save_quick_links(message[len("MINICHROME_LINKS:"):])
+            if is_internal_url(page_url):
+                save_quick_links(message[len("MINICHROME_LINKS:"):])
         elif message.startswith("MINICHROME_AUTOFILL_REQUEST:"):
             try:
-                data = json.loads(message[len("MINICHROME_AUTOFILL_REQUEST:"):])
-                host = self._normalized_host(data.get("host") or "")
+                if page_url.scheme() not in ("http", "https"):
+                    return
+                host = self._normalized_host(page_url.host())
                 if not host:
                     return
 
@@ -2170,14 +2218,16 @@ class WebPage(QWebEnginePage):
 
                 self._last_autofill_host = host
                 self._last_autofill_ts = now_ts
-                creds = self._load_matching_credentials(host, data.get("url") or "")
+                creds = self._load_matching_credentials(host, page_url.toString())
                 self._run_autofill(creds)
             except Exception as e:
                 print(f"[Autofill] Error: {e}")
         elif message.startswith("MINICHROME_PWD:"):
             try:
+                if page_url.scheme() not in ("http", "https"):
+                    return
                 data = json.loads(message[len("MINICHROME_PWD:"):])
-                site = self._normalized_host(data.get("site") or data.get("url") or "")
+                site = self._normalized_host(page_url.host())
                 user = (data.get("user") or "").strip()
                 pwd = data.get("pwd") or ""
                 if not site or not user or not pwd:
@@ -2220,7 +2270,7 @@ class WebPage(QWebEnginePage):
                     "site": site,
                     "user": user,
                     "pwd": pwd,
-                    "url": data.get("url") or ""
+                    "url": page_url.toString()
                 })
             except Exception as e:
                 print(f"[Passwords] Error al capturar: {e}")
@@ -2267,9 +2317,7 @@ class WebView(QWebEngineView):
         self._channel = QWebChannel(self)
         self._bridge = AgendaBridge(self)
         self._pw_bridge = PasswordBridge(self)
-        self._channel.registerObject("py", self._bridge)
-        self._channel.registerObject("pw", self._pw_bridge)
-        self.page().setWebChannel(self._channel)
+        page.set_internal_bridges(self._channel, {"py": self._bridge, "pw": self._pw_bridge})
 
         page.geometryChangeRequested.connect(self._ignore_geom)
         page.fullScreenRequested.connect(self._handle_fullscreen_request)
