@@ -19,6 +19,10 @@
   - Exposes bridges to JS via QWebChannel:
     - `py` (`AgendaBridge`) for agenda, shopping, kanban, notes, media config, video/image APIs.
     - `pw` (`PasswordBridge`) for password CRUD and password auto-save policy.
+- `browser_features.py`
+  - Standard browser features wired from `main.py`: downloads panel (Ctrl+J), find bar (Ctrl+F), DevTools (F12), print/PDF (Ctrl+P), per-site permission prompts, certificate-error dialog, crashed-tab overlay.
+  - "⋮ Más opciones" menu lives in `Minichrome._show_main_menu`; toggles `restoreSession` and `spellCheckEnabled` (`app_config`, default `'0'`).
+  - Internal `ui/` pages skip permission prompts to keep their previous behavior.
 - `ui/agenda.html` + `ui/agenda.js`
   - Multi-view app (Agenda, Compras, Ingresos, Kanban, Notas, Configuracion, Llaves).
   - Uses both bridges: `py` and `pw`.

@@ -13,7 +13,7 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLineEdit, QPushButton, QLabel, QSizePolicy, QFrame,
     QGraphicsDropShadowEffect, QScrollArea, QListWidget, QListWidgetItem,
-    QDialog, QStackedLayout, QDateEdit
+    QDialog, QStackedLayout, QDateEdit, QMenu
 )
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWebEngineCore import (QWebEngineProfile, QWebEnginePage, QWebEngineScript, QWebEngineSettings, QWebEngineUrlRequestInterceptor)
@@ -21,6 +21,7 @@ from PyQt6.QtWebChannel import QWebChannel
 from PyQt6.QtCore import (QUrl, QUrlQuery, Qt, QSize, QTimer, QPropertyAnimation,
                            QEasingCurve, QPoint, QRect, QObject, pyqtSlot, pyqtSignal, QDate)
 from PyQt6.QtGui import QColor, QCursor, QFont, QIcon, QPixmap, QDesktopServices, QImage
+import browser_features as bf
 
 # ─── Config ──────────────────────────────────────────────────────────────────
 BASE  = os.path.dirname(os.path.abspath(__file__))
@@ -31,6 +32,8 @@ LINKS_FILE    = os.path.join(BASE, "quick_links.json")
 SETTINGS_FILE = os.path.join(BASE, "settings.json")
 HOME  = f"file://{os.path.join(BASE, 'ui', 'newtab.html')}"
 UI_DIR = os.path.join(BASE, "ui")
+DICTIONARIES_DIR = "/usr/share/hunspell-bdic"  # diccionarios .bdic del sistema
+SPELL_LANG = "es_ES"
 
 
 def is_internal_url(url) -> bool:
@@ -147,7 +150,10 @@ def _db():
         ('mediaPath', default_media_path),
         ('videoStartMuted', '0'),
         ('videoSortBy', 'name-asc'),
-        ('passwordAutoSavePolicy', 'ask')
+        ('passwordAutoSavePolicy', 'ask'),
+        # Menú "Más opciones": desactivados para conservar el comportamiento previo
+        ('restoreSession', '0'),
+        ('spellCheckEnabled', '0')
     ]
     c.executemany("INSERT OR IGNORE INTO app_config(key,val) VALUES(?,?)", shared_defaults)
 
@@ -178,6 +184,13 @@ def _db():
     c.execute("INSERT OR IGNORE INTO app_config(key,val) VALUES(?,?)", ('screenshotsPath', SCREENSHOTS_DIR))
         
     c.commit(); return c
+
+def get_config(key: str, default: str = "") -> str:
+    c = _db(); r = c.execute("SELECT val FROM app_config WHERE key=?", (key,)).fetchone(); c.close()
+    return r[0] if r else default
+
+def set_config(key: str, val: str):
+    c = _db(); c.execute("INSERT OR REPLACE INTO app_config(key,val) VALUES(?,?)", (key, val)); c.commit(); c.close()
 
 def get_screenshots_dir():
     c = _db()
@@ -362,6 +375,10 @@ def profile():
 
         _ua_interceptor = DomainUAInterceptor(_prof)
         _prof.setUrlRequestInterceptor(_ua_interceptor)
+
+        # Corrector ortográfico (opcional, menú "Más opciones")
+        _prof.setSpellCheckLanguages([SPELL_LANG])
+        _prof.setSpellCheckEnabled(get_config("spellCheckEnabled", "0") == "1")
 
         # CSS Global (scrollbars personalizados delgados y sutiles)
         s = QWebEngineScript()
@@ -2323,6 +2340,12 @@ class WebView(QWebEngineView):
 
         page.geometryChangeRequested.connect(self._ignore_geom)
         page.fullScreenRequested.connect(self._handle_fullscreen_request)
+
+        # Funciones estándar de navegador (browser_features)
+        page.permissionRequested.connect(self._on_permission)
+        page.certificateError.connect(lambda err: bf.handle_certificate_error(self, err))
+        self._crash_overlay = bf.CrashOverlay(self)
+        bf.attach_print_feedback(self, self, self._notify)
         if url:
             self.load(QUrl(url))
         self.loadFinished.connect(self._on_load)
@@ -2366,6 +2389,16 @@ class WebView(QWebEngineView):
 
     def createWindow(self, _type):
         return self.main_win.new_tab("")
+
+    def _notify(self, title, body):
+        if isinstance(self.main_win, QWidget):
+            Notif(title, body, self.main_win)
+
+    def _on_permission(self, permission):
+        # Las páginas internas conservan el comportamiento previo (sin diálogo).
+        if is_internal_url(self.url()):
+            return
+        bf.ask_permission(self, permission)
 
 
 # ─── Estilos comunes ──────────────────────────────────────────────────────────
@@ -2481,7 +2514,16 @@ class Minichrome(QMainWindow):
         self._fav_panel = self._build_fav_panel(root)
         self._hist_panel = self._build_hist_panel(root)
 
-        self.new_tab(HOME)
+        # ── Funciones estándar (descargas, búsqueda, sesión) ──────────────────
+        notify = lambda t, b: Notif(t, b, self)
+        self._downloads = bf.DownloadsPanel(root, notify)
+        self._find_bar = bf.FindBar(root)
+        self._closed_tabs: list[str] = []
+        profile().downloadRequested.connect(self._downloads.handle_request)
+        profile().setNotificationPresenter(self._present_web_notification)
+        QApplication.instance().aboutToQuit.connect(self._save_session)
+
+        self._open_initial_tabs()
         QTimer.singleShot(100, self._reposition)
 
     # ── Construcción de la barra flotante ──────────────────────────────────────
@@ -2773,6 +2815,7 @@ class Minichrome(QMainWindow):
         specs = [
             ("◷", "#3498db", self._toggle_hist_panel, "Historial de navegación"),
             ("★", "#9b59b6", self._toggle_fav_panel, "Favoritos guardados"),
+            ("⋮", "#51a2ff", self._show_main_menu, "Más opciones"),
             ("—", "#febc2e", self.showMinimized, "Minimizar ventana"),
             ("2x", "#16a085", self._expand_two_screens_left, "Expandir a 2 pantallas desde la izquierda (Ctrl+Shift+2)"),
             ("▢", "#28c840", self._toggle_max, "Maximizar / Restaurar"),
@@ -2894,6 +2937,21 @@ class Minichrome(QMainWindow):
         self._win_ctrl.adjustSize()
         self._win_ctrl.move(W - self._win_ctrl.width() - 4, 4)
         self._win_ctrl.raise_()
+        self._place_overlays()
+
+    def _place_overlays(self):
+        """Barra de búsqueda y panel de descargas, alineados a la derecha."""
+        if not hasattr(self, "_find_bar"):
+            return
+        W = self.width()
+        top = (10 + self.TOTAL + 8) if self._bar_open else 12
+        self._find_bar.adjustSize()
+        self._find_bar.move(W - self._find_bar.width() - 12, top)
+        self._find_bar.raise_()
+        dl_top = top + (self._find_bar.height() + 8 if self._find_bar.isVisible() else 0)
+        self._downloads.adjustSize()
+        self._downloads.move(W - self._downloads.width() - 12, dl_top)
+        self._downloads.raise_()
 
     def _check_responsive(self, width):
         """Oculta elementos secundarios si el espacio es reducido."""
@@ -2982,10 +3040,12 @@ class Minichrome(QMainWindow):
         self._anim.setStartValue(self._chrome.pos())
         self._anim.setEndValue(QPoint((self.width() - self._chrome.width())//2, 10))
         self._anim.start()
+        self._place_overlays()
 
     def _hide_bar(self):
         self._bar_open = False
         self._win_ctrl.hide()
+        self._place_overlays()
         self._anim.stop()
         self._anim.setStartValue(self._chrome.pos())
         self._anim.setEndValue(QPoint((self.width() - self._chrome.width())//2, -self.TOTAL - 20))
@@ -3724,6 +3784,8 @@ class Minichrome(QMainWindow):
         self._refresh_tab_styles()
         self._sync_url()
         self._update_zoom_label()
+        if hasattr(self, "_find_bar"):
+            self._find_bar.set_view(self._cur())
 
     def _refresh_tab_styles(self):
         for i, w in enumerate(self._tab_btns):
@@ -3758,6 +3820,10 @@ class Minichrome(QMainWindow):
     def _close_tab_safe(self, idx):
         if len(self._views) <= 1:
             self.new_tab(HOME)
+        closed_url = self._views[idx].url().toString()
+        if closed_url:
+            self._closed_tabs.append(closed_url)
+            del self._closed_tabs[:-25]
         v = self._views.pop(idx)
         v.deleteLater()
         btn = self._tab_btns.pop(idx)
@@ -3953,6 +4019,103 @@ class Minichrome(QMainWindow):
         # Si se abre screenshot_editor, la barra debe permanecer oculta.
 
     # ── Atajos ────────────────────────────────────────────────────────────────
+    # ── Menú "Más opciones" y funciones estándar ──────────────────────────────
+    _MENU_SS = """
+        QMenu{background:rgba(12,18,35,0.98); border:1px solid rgba(81,162,255,0.25);
+          border-radius:8px; padding:6px; color:rgba(255,255,255,0.85); font-size:12px;}
+        QMenu::item{padding:6px 24px 6px 12px; border-radius:5px;}
+        QMenu::item:selected{background:rgba(81,162,255,0.3); color:white;}
+        QMenu::item:disabled{color:rgba(255,255,255,0.3);}
+        QMenu::separator{height:1px; background:rgba(255,255,255,0.08); margin:5px 8px;}
+        QMenu::indicator{width:12px; height:12px; left:4px;}
+    """
+
+    def _show_main_menu(self):
+        btn = self.sender()
+        v = self._cur()
+        is_web = bool(v) and v.url().scheme() in ("http", "https")
+        menu = QMenu(self)
+        menu.setStyleSheet(self._MENU_SS)
+
+        def add(text, fn, enabled=True):
+            act = menu.addAction(text)
+            act.triggered.connect(fn)
+            act.setEnabled(enabled)
+            return act
+
+        add("Nueva pestaña\tCtrl+T", lambda: self.new_tab(HOME))
+        add("Reabrir pestaña cerrada\tCtrl+Shift+T", self._reopen_closed_tab, bool(self._closed_tabs))
+        menu.addSeparator()
+        add("Descargas\tCtrl+J", self._downloads.toggle)
+        add("Buscar en la página…\tCtrl+F", self._open_find, bool(v))
+        add("Imprimir…\tCtrl+P", lambda: bf.print_page(v, self), bool(v))
+        add("Guardar como PDF…", lambda: bf.save_pdf(v, self), bool(v))
+        menu.addSeparator()
+        add("Herramientas para desarrolladores\tF12", self._toggle_devtools, bool(v))
+        add("Restablecer permisos de este sitio", self._reset_site_permissions, is_web)
+        menu.addSeparator()
+        for text, key, fn in (("Restaurar pestañas al iniciar", "restoreSession", None),
+                              ("Corrector ortográfico (español)", "spellCheckEnabled", self._apply_spellcheck)):
+            act = menu.addAction(text)
+            act.setCheckable(True)
+            act.setChecked(get_config(key, "0") == "1")
+            act.toggled.connect(lambda on, k=key, f=fn: (set_config(k, "1" if on else "0"), f and f(on)))
+
+        pos = btn.mapToGlobal(QPoint(btn.width() - menu.sizeHint().width(), btn.height() + 6)) \
+            if isinstance(btn, QWidget) else QCursor.pos()
+        menu.exec(pos)
+
+    def _open_find(self):
+        v = self._cur()
+        if v:
+            self._find_bar.open_bar(v)
+            self._place_overlays()
+
+    def _toggle_devtools(self):
+        v = self._cur()
+        if v:
+            bf.toggle_devtools(v)
+
+    def _reset_site_permissions(self):
+        v = self._cur()
+        if not v:
+            return
+        n = bf.reset_site_permissions(profile(), v.url())
+        Notif("Permisos restablecidos", f"{v.url().host()}: {n} permiso(s)" if n else "Este sitio no tenía permisos guardados", self)
+
+    def _apply_spellcheck(self, on):
+        profile().setSpellCheckEnabled(bool(on))
+
+    def _present_web_notification(self, notification):
+        """Muestra las notificaciones web (sitios con permiso) con el estilo de la app."""
+        notification.show()
+        host = notification.origin().host()
+        Notif(notification.title() or host, notification.message(), self)
+
+    def _reopen_closed_tab(self):
+        if self._closed_tabs:
+            self.new_tab(self._closed_tabs.pop())
+
+    def _save_session(self):
+        tabs = [v.url().toString() for v in self._views if v.url().toString()]
+        set_config("lastSessionTabs", json.dumps({"tabs": tabs, "active": self._active}))
+
+    def _open_initial_tabs(self):
+        """Por defecto abre la página de inicio; restaura la sesión solo si se activó."""
+        if get_config("restoreSession", "0") == "1":
+            try:
+                data = json.loads(get_config("lastSessionTabs", "") or "{}")
+            except ValueError:
+                data = {}
+            tabs = [u for u in data.get("tabs", []) if isinstance(u, str) and u]
+            if tabs:
+                for u in tabs:
+                    self.new_tab(u)
+                active = data.get("active", 0)
+                self._switch(active if isinstance(active, int) and 0 <= active < len(tabs) else 0)
+                return
+        self.new_tab(HOME)
+
     def keyPressEvent(self, e):
         k, m = e.key(), e.modifiers()
         C = Qt.KeyboardModifier.ControlModifier
@@ -3975,12 +4138,21 @@ class Minichrome(QMainWindow):
             self._hide_bar() if self._bar_open else self._show_bar()
         elif k == Qt.Key.Key_F11:
             self.showNormal() if self.isFullScreen() else self.showFullScreen()
+        elif m == CS and k == Qt.Key.Key_T:    self._reopen_closed_tab()
+        elif m == C and k == Qt.Key.Key_J:     self._downloads.toggle(); self._place_overlays()
+        elif m == C and k == Qt.Key.Key_F:     self._open_find()
+        elif m == C and k == Qt.Key.Key_P:
+            if self._cur(): bf.print_page(self._cur(), self)
+        elif k == Qt.Key.Key_F12 or (m == CS and k == Qt.Key.Key_I):
+            self._toggle_devtools()
         else: super().keyPressEvent(e)
 
 # ─── Arranque ─────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     os.environ.setdefault("QTWEBENGINE_CHROMIUM_FLAGS",
                           "--enable-features=WebRTCPipeWireCapturer")
+    if os.path.isdir(DICTIONARIES_DIR):
+        os.environ.setdefault("QTWEBENGINE_DICTIONARIES_PATH", DICTIONARIES_DIR)
     app = QApplication(sys.argv)
     app.setApplicationName("Minichrome")
     app.setFont(QFont("Inter", 10))
