@@ -67,6 +67,13 @@ def downloads_dir() -> str:
     return path or os.path.expanduser("~")
 
 
+def _relayout(widget):
+    """Pide a la ventana principal que reacomode los paneles flotantes."""
+    place = getattr(widget.window(), "_place_overlays", None)
+    if callable(place):
+        place()
+
+
 def _choice_dialog(parent, title: str, body: str, buttons: list[tuple[str, str, str]]) -> str:
     """Modal con el estilo de la app. buttons = [(clave, texto, objectName)].
     Devuelve la clave pulsada o "" si se cerró."""
@@ -255,6 +262,7 @@ class DownloadsPanel(QFrame):
 
     def show_panel(self):
         self.show()
+        _relayout(self)
         self.raise_()
 
     def toggle(self):
@@ -389,6 +397,7 @@ class FindBar(QFrame):
     def open_bar(self, view):
         self.set_view(view)
         self.show()
+        _relayout(self)
         self.raise_()
         sel = view.selectedText() if view else ""
         if sel and "\n" not in sel:
@@ -407,6 +416,7 @@ class FindBar(QFrame):
                 pass
         self._count.setText("")
         self.hide()
+        _relayout(self)
 
     def _find(self, backward=False):
         if self._view is None:
@@ -485,6 +495,8 @@ def toggle_devtools(view: QWebEngineView):
     win = getattr(view, "_devtools_win", None)
     if win is None:
         win = QMainWindow()
+        # Ventana auxiliar: no debe mantener viva la app al cerrar la principal.
+        win.setAttribute(Qt.WidgetAttribute.WA_QuitOnClose, False)
         dv = QWebEngineView(view.page().profile(), win)
         win.setCentralWidget(dv)
         win.resize(1100, 720)

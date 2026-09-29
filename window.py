@@ -1637,6 +1637,7 @@ class Minichrome(QMainWindow):
         pos = btn.mapToGlobal(QPoint(btn.width() - menu.sizeHint().width(), btn.height() + 6)) \
             if isinstance(btn, QWidget) else QCursor.pos()
         menu.exec(pos)
+        menu.deleteLater()
 
     def _open_find(self):
         v = self._cur()
