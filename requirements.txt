@@ -2,3 +2,6 @@
 # Instalar: uv venv --python 3.12 .venv && uv pip install -r requirements.txt
 PyQt6==6.11.0
 PyQt6-WebEngine==6.11.0
+# Cifrado de contraseñas: clave en el llavero del sistema (Secret Service)
+keyring==25.7.0
+cryptography==50.0.1
