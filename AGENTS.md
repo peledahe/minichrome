@@ -7,8 +7,10 @@
 - Web runtime cache/profile: `web_cache/`.
 
 ## Run And Verify
-- Run app: `python main.py`
-- Quick syntax check (no launch): `python -m py_compile main.py`
+- Runtime: PyQt6/QtWebEngine from PyPI (pinned in `requirements.txt`) inside `.venv`, not the system Qt from apt.
+- Setup: `uv venv --python 3.12 .venv && VIRTUAL_ENV=.venv uv pip install -r requirements.txt`
+- Run app: `.venv/bin/python main.py` (the desktop launcher `~/.local/share/applications/minibrowser.desktop` uses this interpreter)
+- Quick syntax check (no launch): `.venv/bin/python -m py_compile main.py`
 
 ## Architecture Map
 - `main.py`

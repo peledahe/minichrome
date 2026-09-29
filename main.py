@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 import json
 import base64
@@ -351,8 +352,9 @@ def profile():
     global _prof, _ua_interceptor
     if not _prof:
         _prof = QWebEngineProfile("MinichromeProfile")
-        # Usamos un UA de Windows moderno (Chrome 124) que suele tener menos restricciones
-        _prof.setHttpUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+        # UA real del motor sin la marca "QtWebEngine/x.y.z", que algunos sitios
+        # bloquean; así coincide con la versión de Chrome que realmente corre.
+        _prof.setHttpUserAgent(re.sub(r"\s*QtWebEngine/\S+", "", _prof.httpUserAgent()))
         _prof.setPersistentStoragePath(CACHE)
         _prof.setCachePath(os.path.join(CACHE, "httpcache"))
         _prof.setHttpCacheType(QWebEngineProfile.HttpCacheType.DiskHttpCache)
