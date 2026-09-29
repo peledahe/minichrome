@@ -1312,3 +1312,43 @@
     box-shadow: 0 6px 16px rgba(79, 70, 229, 0.35) !important;
     transform: translateY(-1px) !important;
 }
+
+/* ── Modo claro: elementos activos y botones principales ─────────────────────
+   La regla genérica de botones claros (fondo claro, texto gris) es más específica
+   que la de ".active" y borraba el acento: el chip/pestaña/filtro seleccionado se
+   veía igual que los demás y el botón de buscar quedaba blanco sobre blanco.
+   Esa regla incluye #back-btn/#exit-btn, así que :is() le da especificidad de ID;
+   :not(#_) (no excluye nada) iguala esa especificidad para que estas ganen. */
+:root[data-theme='light'] :is(
+    .tab.active,
+    .ag-tab.active,
+    .engine-chip.active,
+    .nav-item.active,
+    .pw-filter.active,
+    .browser-tab.active,
+    .pw-type-btn.active
+):not(#_),
+:root[data-theme='light'] :is(
+    .tab.active,
+    .ag-tab.active,
+    .engine-chip.active,
+    .nav-item.active,
+    .pw-filter.active,
+    .browser-tab.active,
+    .pw-type-btn.active
+):not(#_):hover {
+    background: var(--ui-active-bg) !important;
+    color: var(--ui-active-fg) !important;
+    border-color: transparent !important;
+}
+
+:root[data-theme='light'] :is(.search-btn, .ql-btn.primary):not(#_) {
+    background: var(--ui-active-bg) !important;
+    color: #ffffff !important;
+    border-color: transparent !important;
+}
+
+:root[data-theme='light'] :is(.search-btn, .ql-btn.primary):not(#_):hover {
+    background: #4338ca !important;
+    color: #ffffff !important;
+}
