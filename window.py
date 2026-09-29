@@ -388,11 +388,11 @@ class Minichrome(QMainWindow):
         specs = [
             ("◷", "#3498db", self._toggle_hist_panel, "Historial de navegación"),
             ("★", "#9b59b6", self._toggle_fav_panel, "Favoritos guardados"),
-            ("⋮", "#51a2ff", self._show_main_menu, "Más opciones"),
             ("—", "#febc2e", self.showMinimized, "Minimizar ventana"),
             ("2x", "#16a085", self._expand_two_screens_left, "Expandir a 2 pantallas desde la izquierda (Ctrl+Shift+2)"),
             ("▢", "#28c840", self._toggle_max, "Maximizar / Restaurar"),
             ("✕", "#ff5f57", self.close, "Cerrar ventana"),
+            ("⋮", "#51a2ff", self._show_main_menu, "Más opciones"),
         ]
         for sym, col, fn, tip in specs:
             b = QPushButton(sym)
