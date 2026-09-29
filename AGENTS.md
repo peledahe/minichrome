@@ -23,6 +23,7 @@
     - `pw` (`PasswordBridge`) for password CRUD and password auto-save policy.
   - `browser.py`: web profile (`profile()`), `WebPage` (password capture/autofill, bridge exposure only on internal pages), `WebView`.
   - `window.py`: main window `Minichrome` (tabs, bar, panels, shortcuts, "⋮" menu).
+  - `screen_capture.py`: desktop area selection overlay (F9), Qt port of the ScreenShot app overlay.
   - `google_sync.py`: Google Calendar sync (desktop OAuth + PKCE, stdlib HTTP). OAuth client JSON and refresh token live in the system keyring; Google events are cached in `google_events`; dated activities are mirrored (all-day events tagged with `extendedProperties.private.mcKey`) into a dedicated "Minichrome" calendar. Exposed to `ui/newtab.html` (calendar modal) via `py.google_*` slots and the `google_changed` signal.
   - `main.py`: entrypoint only (env flags, `QApplication`, password migration, window).
 - `browser_features.py`
@@ -38,6 +39,10 @@
   - Uses QWebChannel `py` APIs for folders, videos, tags, playback, playlists.
 - `ui/imageplayer.html` + `ui/imageplayer.js`
   - Uses QWebChannel `py` APIs for image browsing and file operations.
+- `ui/screenshot_editor.html` + `ui/screenshot_editor.js` + `ui/screenshot_editor.css`
+  - Screenshot editor copied from the ScreenShot app (`~/Desarrollo/ScreenShot`, `index.html`/`editor.js`/`editor.css`) with minimal changes.
+  - `ui/screenshot_bridge.js` provides the `window.electronAPI` the editor expects, backed by `py` slots (`copy_annotated_screenshot`, `save_screenshot_as`, `open_image_file`, `select_directory`, `start_area_screenshot` + `screenshot_ready` signal, `read_screenshot_image`, `discard_screenshot`).
+  - To sync with upstream ScreenShot changes, re-copy `editor.js`/`editor.css` and keep the two marked edits at the top of `screenshot_editor.js`.
 - `ui/passwords.html` + `ui/passwords.js`
   - Dedicated password manager page using `pw` bridge.
 

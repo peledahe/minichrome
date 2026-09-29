@@ -2,6 +2,7 @@
 import os
 import json
 import browser_features as bf
+import screen_capture
 from datetime import datetime
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QPushButton,
@@ -1580,16 +1581,32 @@ class Minichrome(QMainWindow):
 
         save_screenshot(raw_path, v.url().toString())
         QApplication.clipboard().setPixmap(pix)
+        self._open_screenshot_editor(raw_path)
+        Notif("Captura guardada", "Se copio al portapapeles y se abrio el editor", self.centralWidget())
+        # Si se abre screenshot_editor, la barra debe permanecer oculta.
 
-        editor_path = os.path.join(BASE, "ui", "screenshot_editor.html")
-        editor_url = QUrl.fromLocalFile(editor_path)
+    def _open_screenshot_editor(self, raw_path):
+        editor_url = QUrl.fromLocalFile(os.path.join(BASE, "ui", "screenshot_editor.html"))
         query = QUrlQuery()
         query.addQueryItem("img", raw_path)
         editor_url.setQuery(query)
         self.new_tab(editor_url.toString())
 
-        Notif("Captura guardada", "Se copio al portapapeles y se abrio el editor", self.centralWidget())
-        # Si se abre screenshot_editor, la barra debe permanecer oculta.
+    def _capture_area(self):
+        """F9 (como ScreenShot): elegir un área del escritorio y abrirla en el editor."""
+        def done(pix):
+            if pix is None or pix.isNull():
+                return
+            stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
+            raw_path = os.path.join(get_screenshots_dir(), f"shot_{stamp}.png")
+            if not pix.save(raw_path, "PNG"):
+                Notif("Captura fallida", "No se pudo guardar la imagen", self.centralWidget())
+                return
+            save_screenshot(raw_path, "area")
+            if self._bar_open:
+                self._hide_bar()
+            self._open_screenshot_editor(raw_path)
+        screen_capture.capture_area(self, done)
 
     # ── Atajos ────────────────────────────────────────────────────────────────
     # ── Menú "Más opciones" y funciones estándar ──────────────────────────────
@@ -1624,6 +1641,7 @@ class Minichrome(QMainWindow):
         add("Imprimir…\tCtrl+P", lambda: bf.print_page(v, self), bool(v))
         add("Guardar como PDF…", lambda: bf.save_pdf(v, self), bool(v))
         menu.addSeparator()
+        add("Capturar área de la pantalla\tF9", self._capture_area)
         add("Herramientas para desarrolladores\tF12", self._toggle_devtools, bool(v))
         add("Restablecer permisos de este sitio", self._reset_site_permissions, is_web)
         menu.addSeparator()
@@ -1717,6 +1735,7 @@ class Minichrome(QMainWindow):
         elif m == C and k == Qt.Key.Key_F:     self._open_find()
         elif m == C and k == Qt.Key.Key_P:
             if self._cur(): bf.print_page(self._cur(), self)
+        elif k == Qt.Key.Key_F9:               self._capture_area()
         elif k == Qt.Key.Key_F12 or (m == CS and k == Qt.Key.Key_I):
             self._toggle_devtools()
         else: super().keyPressEvent(e)

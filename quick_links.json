@@ -34,5 +34,21 @@
   {
     "name": "Gemini Notebook",
     "url": "https://notebook.google.com/"
+  },
+  {
+    "name": "Teams",
+    "url": "https://teams.live.com/free"
+  },
+  {
+    "name": "Meet",
+    "url": "https://meet.google.com/home"
+  },
+  {
+    "name": "Merke.net",
+    "url": "https://merke.net"
+  },
+  {
+    "name": "ProDaily",
+    "url": "https://prodaily.merke.net/"
   }
 ]

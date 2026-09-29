@@ -6,7 +6,7 @@ import shutil
 import subprocess
 from datetime import datetime
 from PyQt6.QtWidgets import QApplication, QFileDialog
-from PyQt6.QtCore import QUrl, QObject, pyqtSlot, pyqtSignal, QStandardPaths
+from PyQt6.QtCore import QUrl, QObject, pyqtSlot, pyqtSignal, QStandardPaths, QBuffer, QIODevice
 from PyQt6.QtGui import QImage
 from secure_store import encrypt, decrypt
 import google_sync
@@ -1035,6 +1035,88 @@ class AgendaBridge(QObject):
         except Exception as ex:
             print(f"[Screenshot] Error al copiar anotacion: {ex}")
             return False
+
+    # ─── Editor de capturas (misma API que usa el editor de ScreenShot) ──────
+    screenshot_ready = pyqtSignal(str)  # data URL de una nueva captura de área
+
+    @staticmethod
+    def _image_data_url(path):
+        ext = os.path.splitext(path)[1].lower().lstrip(".")
+        mime = {"png": "image/png", "webp": "image/webp", "gif": "image/gif",
+                "bmp": "image/bmp"}.get(ext, "image/jpeg")
+        with open(path, "rb") as f:
+            return f"data:{mime};base64,{base64.b64encode(f.read()).decode('ascii')}"
+
+    @pyqtSlot(str, result=str)
+    def read_screenshot_image(self, path):
+        """Data URL de una captura de Minichrome (solo archivos de la carpeta de capturas)."""
+        try:
+            src = QUrl(path).toLocalFile() if path.startswith("file://") else path
+            base = os.path.realpath(get_screenshots_dir())
+            real = os.path.realpath(src)
+            if not real.startswith(base + os.sep) or not os.path.isfile(real):
+                return ""
+            return self._image_data_url(real)
+        except Exception as ex:
+            print(f"[Screenshot] No se pudo leer la captura: {ex}")
+            return ""
+
+    @pyqtSlot(str, str, result=str)
+    def save_screenshot_as(self, data_url, default_dir):
+        """Diálogo 'Guardar como' (igual que ScreenShot). Devuelve JSON {success, filePath, canceled}."""
+        try:
+            if not data_url.startswith("data:image/"):
+                return json.dumps({"success": False})
+            target = default_dir if default_dir and os.path.isdir(default_dir) else get_screenshots_dir()
+            name = f"ScreenShot_{datetime.now().strftime('%Y-%m-%dT%H-%M-%S')}.png"
+            path, _ = QFileDialog.getSaveFileName(self.parent(), "Guardar Captura de Pantalla",
+                                                  os.path.join(target, name), "Imágenes PNG (*.png)")
+            if not path:
+                return json.dumps({"success": False, "canceled": True})
+            if not path.lower().endswith(".png"):
+                path += ".png"
+            with open(path, "wb") as f:
+                f.write(base64.b64decode(data_url.split(",", 1)[1]))
+            save_screenshot(path, "annotated")
+            return json.dumps({"success": True, "filePath": path})
+        except Exception as ex:
+            print(f"[Screenshot] Error al guardar: {ex}")
+            return json.dumps({"success": False, "error": str(ex)})
+
+    @pyqtSlot(result=str)
+    def select_directory(self):
+        path = QFileDialog.getExistingDirectory(self.parent(), "Seleccionar Carpeta para Guardar Capturas",
+                                                get_screenshots_dir())
+        return path or ""
+
+    @pyqtSlot(result=str)
+    def open_image_file(self):
+        """Diálogo 'Abrir imagen'. Devuelve JSON {success, dataUrl, canceled}."""
+        start = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.PicturesLocation)
+        path, _ = QFileDialog.getOpenFileName(self.parent(), "Abrir Imagen para Editar", start,
+                                              "Imágenes (*.png *.jpg *.jpeg *.webp *.bmp *.gif)")
+        if not path:
+            return json.dumps({"success": False, "canceled": True})
+        try:
+            return json.dumps({"success": True, "dataUrl": self._image_data_url(path), "filePath": path})
+        except Exception as ex:
+            return json.dumps({"success": False, "error": str(ex)})
+
+    @pyqtSlot()
+    def start_area_screenshot(self):
+        """Nueva captura (F9): selección de área del escritorio; emite screenshot_ready."""
+        import screen_capture
+        mw = self.parent().main_win
+
+        def done(pixmap):
+            if pixmap is None or pixmap.isNull():
+                return
+            buf = QBuffer()
+            buf.open(QIODevice.OpenModeFlag.WriteOnly)
+            pixmap.save(buf, "PNG")
+            self.screenshot_ready.emit("data:image/png;base64," + base64.b64encode(bytes(buf.data())).decode("ascii"))
+
+        screen_capture.capture_area(mw, done)
 
     @pyqtSlot(str, result=bool)
     def discard_screenshot(self, original_path):
