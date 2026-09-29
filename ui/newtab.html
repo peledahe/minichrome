@@ -484,8 +484,132 @@
             right: 74px;
             text-align: right;
             opacity: 0.48;
-            pointer-events: none;
             z-index: 2;
+            cursor: pointer;
+            border-radius: 10px;
+            padding: 4px 6px;
+            transition: opacity 0.2s, background 0.2s;
+        }
+        .clock-wrap:hover { opacity: 0.9; background: var(--glass); }
+
+        /* ---- Calendario de actividades ---- */
+        .cal-overlay {
+            display: none; position: fixed; inset: 0; z-index: 1100;
+            background: rgba(0,0,0,0.55); backdrop-filter: blur(6px);
+            align-items: center; justify-content: center;
+        }
+        .cal-overlay.active { display: flex; }
+        .cal-detail-overlay { z-index: 1200; background: rgba(0,0,0,0.35); }
+        .cal-modal, .cal-detail {
+            --cal-bg: #14141c; --cal-cell: rgba(255,255,255,0.03); --cal-cell-hover: rgba(255,255,255,0.07);
+            --cal-border: rgba(255,255,255,0.08); --cal-fg: #f3f4f6; --cal-muted: rgba(243,244,246,0.5);
+            background: var(--cal-bg); color: var(--cal-fg);
+            border: 1px solid var(--cal-border); border-radius: 18px;
+            box-shadow: 0 24px 64px rgba(0,0,0,0.45);
+        }
+        :root[data-theme='light'] .cal-modal, :root[data-theme='light'] .cal-detail {
+            --cal-bg: #ffffff; --cal-cell: #f8fafc; --cal-cell-hover: #eef2ff;
+            --cal-border: rgba(31,41,55,0.1); --cal-fg: #111827; --cal-muted: rgba(17,24,39,0.5);
+            box-shadow: 0 24px 64px rgba(31,41,55,0.18);
+        }
+        .cal-modal {
+            /* Ocupa toda la página visible (la barra del navegador se oculta mientras está abierto) */
+            width: calc(100vw - 24px); height: calc(100vh - 24px);
+            display: flex; flex-direction: column; padding: 18px 20px 14px; gap: 10px;
+        }
+        .cal-header { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+        .cal-header h3 { font-size: 1.15rem; font-weight: 600; min-width: 170px; text-align: center; text-transform: capitalize; }
+        .cal-btn {
+            background: var(--cal-cell); border: 1px solid var(--cal-border); color: var(--cal-fg);
+            border-radius: 8px; height: 30px; min-width: 30px; padding: 0 10px; cursor: pointer;
+            font-family: inherit; font-size: 0.82rem; display: inline-flex; align-items: center; justify-content: center;
+        }
+        .cal-btn:hover { background: var(--cal-cell-hover); }
+        .cal-filters { display: flex; gap: 6px; flex-wrap: wrap; margin-left: auto; }
+        .cal-filter {
+            display: inline-flex; align-items: center; gap: 6px; cursor: pointer; user-select: none;
+            font-size: 0.74rem; padding: 4px 10px; border-radius: 999px;
+            border: 1px solid var(--cal-border); background: var(--cal-cell); color: var(--cal-fg);
+        }
+        .cal-filter .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--c); }
+        .cal-filter .count { color: var(--cal-muted); }
+        .cal-filter.off { opacity: 0.4; }
+        .cal-filter.off .dot { background: transparent; border: 1px solid var(--c); }
+        .cal-weekdays, .cal-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+        .cal-weekdays div { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--cal-muted); text-align: center; padding: 2px 0; }
+        .cal-grid { flex: 1; grid-auto-rows: minmax(0, 1fr); min-height: 0; }
+        .cal-day {
+            background: var(--cal-cell); border: 1px solid var(--cal-border); border-radius: 10px;
+            padding: 5px 6px; display: flex; flex-direction: column; gap: 3px; min-height: 0; overflow: hidden;
+            cursor: default; transition: background 0.15s;
+        }
+        .cal-day.has-events { cursor: pointer; }
+        .cal-day.has-events:hover { background: var(--cal-cell-hover); }
+        .cal-day.out { opacity: 0.4; }
+        .cal-day-num { font-size: 0.75rem; font-weight: 600; color: var(--cal-muted); align-self: flex-end; line-height: 1; padding: 2px 4px; border-radius: 999px; }
+        .cal-day.today .cal-day-num { background: var(--accent); color: #fff; }
+        .cal-pill {
+            font-size: 0.7rem; line-height: 1.25; padding: 2px 6px; border-radius: 5px; cursor: pointer;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--cal-fg);
+            border-left: 3px solid var(--c); background: color-mix(in srgb, var(--c) 16%, transparent);
+        }
+        .cal-pill:hover { background: color-mix(in srgb, var(--c) 30%, transparent); }
+        .cal-pill.done { opacity: 0.55; text-decoration: line-through; }
+        .cal-more { font-size: 0.68rem; color: var(--cal-muted); padding-left: 4px; cursor: pointer; }
+        .cal-more:hover { color: var(--cal-fg); }
+        .cal-footer { display: flex; align-items: center; gap: 10px; font-size: 0.76rem; color: var(--cal-muted); min-height: 30px; padding-right: 40px; /* espacio para el botón de tema */ }
+        .cal-footer .cal-btn { margin-left: auto; font-size: 0.76rem; }
+        .cal-status { text-align: center; color: var(--cal-muted); font-size: 0.85rem; padding: 40px 0; grid-column: 1 / -1; }
+
+        .cal-detail { width: min(460px, 92vw); max-height: 82vh; overflow-y: auto; padding: 22px 24px; display: flex; flex-direction: column; gap: 14px; }
+        .cal-detail-type { display: inline-flex; align-items: center; gap: 8px; font-size: 0.74rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--c); }
+        .cal-detail-type .dot { width: 10px; height: 10px; border-radius: 3px; background: var(--c); }
+        .cal-detail h4 { font-size: 1.1rem; font-weight: 600; line-height: 1.35; word-break: break-word; }
+        .cal-detail h4.done { text-decoration: line-through; opacity: 0.6; }
+        .cal-detail-date { font-size: 0.82rem; color: var(--cal-muted); margin-top: -8px; }
+        .cal-detail-date::first-letter { text-transform: uppercase; }
+        .cal-fields { display: grid; grid-template-columns: auto 1fr; gap: 8px 14px; font-size: 0.85rem; }
+        .cal-fields dt { color: var(--cal-muted); }
+        .cal-fields dd { margin: 0; white-space: pre-wrap; word-break: break-word; }
+        .cal-fields dd a { color: var(--accent2); text-decoration: underline; cursor: pointer; word-break: break-all; }
+        .cal-fields dd a:hover { opacity: 0.8; }
+        .cal-copy-btn {
+            display: inline-flex; align-items: center; gap: 4px; vertical-align: middle;
+            margin-left: 6px; padding: 2px 6px; height: 22px; border-radius: 6px; cursor: pointer;
+            border: 1px solid var(--cal-border); background: var(--cal-cell); color: var(--cal-muted);
+            font-family: inherit; font-size: 0.7rem; white-space: nowrap;
+        }
+        .cal-copy-btn:hover { color: var(--cal-fg); background: var(--cal-cell-hover); }
+        .cal-copy-btn.copied { color: #22c55e; border-color: color-mix(in srgb, #22c55e 45%, transparent); }
+        .cal-badge { display: inline-block; font-size: 0.72rem; padding: 2px 8px; border-radius: 999px; background: color-mix(in srgb, var(--c) 18%, transparent); color: var(--cal-fg); }
+        .cal-list { display: flex; flex-direction: column; gap: 6px; }
+        .cal-list-item {
+            display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 10px; cursor: pointer;
+            background: var(--cal-cell); border: 1px solid var(--cal-border); font-size: 0.85rem;
+        }
+        .cal-list-item:hover { background: var(--cal-cell-hover); }
+        .cal-list-item .dot { width: 9px; height: 9px; border-radius: 3px; background: var(--c); flex-shrink: 0; }
+        .cal-list-item .t { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .cal-list-item.done .t { text-decoration: line-through; opacity: 0.55; }
+        .cal-list-item .s { font-size: 0.72rem; color: var(--cal-muted); }
+        .cal-detail-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+        .cal-detail-actions .primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+        .cal-detail-actions .danger { color: #ef4444; }
+        .cal-google-btn { gap: 6px; }
+        .cal-google-btn .gdot { width: 7px; height: 7px; border-radius: 50%; background: var(--cal-muted); }
+        .cal-google-btn.connected .gdot { background: #22c55e; }
+        .cal-google-btn.busy .gdot { background: #f59e0b; animation: calPulse 1s infinite alternate; }
+        .cal-google-btn.error .gdot { background: #ef4444; }
+        @keyframes calPulse { from { opacity: 0.35; } to { opacity: 1; } }
+        .gs-text { font-size: 0.85rem; line-height: 1.5; color: var(--cal-fg); }
+        .gs-muted { font-size: 0.78rem; color: var(--cal-muted); line-height: 1.5; }
+        .gs-error { font-size: 0.8rem; color: #ef4444; background: color-mix(in srgb, #ef4444 12%, transparent); border-radius: 8px; padding: 8px 10px; }
+        .gs-steps { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 7px; font-size: 0.83rem; line-height: 1.45; }
+        .gs-steps a { color: var(--accent2); cursor: pointer; text-decoration: underline; }
+        .gs-steps b { font-weight: 600; }
+        @media (max-width: 700px) {
+            .cal-pill { font-size: 0.62rem; padding: 1px 4px; }
+            .cal-header h3 { min-width: 0; }
         }
         .clock-time { font-size: 1.7rem; font-weight: 600; letter-spacing: -0.03em; line-height: 1; }
         .clock-date { font-size: 0.68rem; font-weight: 300; margin-top: 2px; }
@@ -629,10 +753,35 @@
     </div>
 
     <!-- Reloj -->
-    <div class="clock-wrap">
+    <div class="clock-wrap" id="clock-wrap" title="Ver calendario de actividades" role="button" tabindex="0">
         <div class="clock-time" id="clock-time">00:00</div>
         <div class="clock-date" id="clock-date"></div>
     </div>
+
+    <!-- Calendario de actividades (Agenda, Kanban, Compras, Ingresos) -->
+    <div class="cal-overlay" id="cal-overlay">
+        <div class="cal-modal" role="dialog" aria-label="Calendario de actividades">
+            <div class="cal-header">
+                <button class="cal-btn" id="cal-prev" title="Mes anterior">‹</button>
+                <h3 id="cal-title"></h3>
+                <button class="cal-btn" id="cal-next" title="Mes siguiente">›</button>
+                <button class="cal-btn" id="cal-today">Hoy</button>
+                <button class="cal-btn cal-google-btn" id="cal-google" title="Sincronizar con Google Calendar"><span class="gdot"></span>Google</button>
+                <div class="cal-filters" id="cal-filters"></div>
+                <button class="cal-btn" id="cal-close" title="Cerrar (Esc)">✕</button>
+            </div>
+            <div class="cal-weekdays">
+                <div>Lun</div><div>Mar</div><div>Mié</div><div>Jue</div><div>Vie</div><div>Sáb</div><div>Dom</div>
+            </div>
+            <div class="cal-grid" id="cal-grid"></div>
+            <div class="cal-footer" id="cal-footer"></div>
+        </div>
+    </div>
+    <div class="cal-overlay cal-detail-overlay" id="cal-detail-overlay">
+        <div class="cal-detail" id="cal-detail" role="dialog"></div>
+    </div>
+
+    <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
 
     <script>
         // ---- Reloj ----
@@ -1149,6 +1298,558 @@
         document.getElementById('btn-goto-kanban').addEventListener('click', () => goToAgendaTab('kanban'));
         document.getElementById('btn-goto-notes').addEventListener('click', () => goToAgendaTab('notes'));
         document.getElementById('btn-goto-arcade').addEventListener('click', () => deskioNavigate('arcade.html'));
+
+        // ---- Calendario de actividades ----
+        // Lee Agenda, Kanban, Compras e Ingresos por el bridge `py` (solo lectura).
+        const CAL_TYPES = {
+            agenda:   { label: 'Agenda',          color: '#6c5ce7', tab: 'agenda' },
+            kanban:   { label: 'Kanban',          color: '#00b894', tab: 'kanban' },
+            shopping: { label: 'Compras y pagos', color: '#e17055', tab: 'shopping' },
+            income:   { label: 'Ingresos',        color: '#0984e3', tab: 'income' },
+            google:   { label: 'Google',          color: '#e84393', tab: null },
+        };
+        const KANBAN_STATUS = ['Pendiente', 'En proceso', 'Bloqueada', 'Completada'];  // columnas 1..4
+        const KANBAN_PRIORITY = { high: 'Alta', medium: 'Media', low: 'Baja' };
+        const MONTHS = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+
+        const calState = { year: 0, month: 0, events: [], undated: [], hidden: new Set(), error: '', google: null };
+
+        const calBridge = new Promise(resolve => {
+            try {
+                if (typeof QWebChannel === 'undefined' || !window.qt || !qt.webChannelTransport) return resolve(null);
+                new QWebChannel(qt.webChannelTransport, ch => resolve(ch.objects.py || null));
+            } catch (_) { resolve(null); }
+        });
+
+        function calEl(tag, cls, text) {
+            const e = document.createElement(tag);
+            if (cls) e.className = cls;
+            if (text !== undefined && text !== null) e.textContent = String(text);
+            return e;
+        }
+
+        function isoDate(value) {
+            const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(value || '').trim());
+            return m ? `${m[1]}-${m[2]}-${m[3]}` : '';
+        }
+
+        function toIso(d) {
+            return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        }
+
+        function longDate(iso) {
+            const [y, m, d] = iso.split('-').map(Number);
+            return new Date(y, m - 1, d).toLocaleDateString('es', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+        }
+
+        function money(value, currency) {
+            const n = Number(value);
+            if (!isFinite(n)) return '';
+            const txt = n.toLocaleString('es', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            return currency ? `${currency} ${txt}` : txt;
+        }
+
+        function parseKanbanText(text) {
+            // Mismo formato que la Agenda: Título | Descripción | Vence: YYYY-MM-DD | Prioridad: x | Etiquetas: a, b
+            const r = { title: '', description: [], due: '', priority: 'medium', labels: [] };
+            for (const part of String(text || '').split(' | ').map(p => p.trim())) {
+                if (part.startsWith('Vence: ')) r.due = part.slice(7);
+                else if (part.startsWith('Prioridad: ')) r.priority = part.slice(11).toLowerCase();
+                else if (part.startsWith('Etiquetas: ')) r.labels = part.slice(11).split(',').map(l => l.trim()).filter(Boolean);
+                else if (!r.title) r.title = part;
+                else r.description.push(part);
+            }
+            r.description = r.description.join(' | ');
+            return r;
+        }
+
+        async function loadCalendarData() {
+            const py = await calBridge;
+            if (!py) throw new Error('Sin conexión con la aplicación');
+            const [agenda, shopping, income, ...kanbanCols] = await Promise.all([
+                py.get_agenda(), py.get_shopping(), py.get_income(),
+                ...[1, 2, 3, 4].map(col => py.get_kanban_cards(col)),
+            ]);
+            const events = [];
+            (agenda || []).forEach(a => events.push({
+                type: 'agenda', date: isoDate(a.dueDate), title: a.text || '(sin título)', done: !!a.done,
+                status: a.done ? 'Completada' : 'Pendiente',
+                fields: [['Etiqueta', a.tag], ['Notas', a.notes]],
+            }));
+            (shopping || []).forEach(s => events.push({
+                type: 'shopping', date: isoDate(s.dueDate), title: s.text || '(sin título)', done: !!s.done,
+                status: s.done ? 'Pagado' : 'Pendiente de pago',
+                fields: [['Monto', money(s.value, s.currency)], ['Método de pago', s.paymentMethod], ['Notas', s.notes]],
+            }));
+            (income || []).forEach(i => events.push({
+                type: 'income', date: isoDate(i.dueDate), title: i.text || '(sin título)', done: !!i.received,
+                status: i.received ? 'Recibido' : 'Por recibir',
+                fields: [['Monto', money(i.value, i.currency)], ['Notas', i.notes]],
+            }));
+            kanbanCols.forEach((cards, idx) => (cards || []).forEach(card => {
+                const k = parseKanbanText(card.text);
+                events.push({
+                    type: 'kanban', date: isoDate(k.due), title: k.title || '(sin título)', done: idx === 3,
+                    status: KANBAN_STATUS[idx] || '',
+                    fields: [['Prioridad', KANBAN_PRIORITY[k.priority] || ''], ['Etiquetas', k.labels.join(', ')], ['Descripción', k.description]],
+                });
+            }));
+            // Eventos de Google (caché local de la última sincronización); los de varios días se repiten por día
+            const google = py.get_google_events ? JSON.parse(await py.get_google_events() || '[]') : [];
+            google.forEach(g => {
+                const start = isoDate(g.start), end = isoDate(g.end) || start;
+                if (!start) return;
+                let when = 'Todo el día';
+                if (!g.allDay) when = g.start === g.end ? `${g.startTime} – ${g.endTime}` : `${g.startTime} (${longDate(start)}) – ${g.endTime} (${longDate(end)})`;
+                else if (end !== start) when = `Del ${longDate(start)} al ${longDate(end)}`;
+                const base = {
+                    type: 'google', title: g.title, done: false, status: '', link: g.link,
+                    pillPrefix: g.allDay ? '' : g.startTime + ' ',
+                    fields: [['Horario', when], ['Calendario', g.calendar], ['Lugar', g.location], ['Descripción', g.description]],
+                };
+                const [y, m, d] = start.split('-').map(Number);
+                for (let i = 0; i < 62; i += 1) {
+                    const day = toIso(new Date(y, m - 1, d + i));
+                    if (day > end) break;
+                    events.push({ ...base, date: day });
+                }
+            });
+            calState.events = events.filter(e => e.date);
+            calState.undated = events.filter(e => !e.date && !e.done);
+        }
+
+        function visibleEvents(list) {
+            const order = Object.keys(CAL_TYPES);
+            return list.filter(e => !calState.hidden.has(e.type))
+                .sort((a, b) => (a.done - b.done) || (order.indexOf(a.type) - order.indexOf(b.type)));
+        }
+
+        function eventsOn(iso) {
+            return visibleEvents(calState.events.filter(e => e.date === iso));
+        }
+
+        function renderCalFilters() {
+            const wrap = document.getElementById('cal-filters');
+            wrap.innerHTML = '';
+            const prefix = `${calState.year}-${String(calState.month + 1).padStart(2, '0')}-`;
+            Object.entries(CAL_TYPES).forEach(([key, t]) => {
+                const count = calState.events.filter(e => e.type === key && e.date.startsWith(prefix)).length;
+                if (key === 'google' && !count && !(calState.google && calState.google.connected)) return;
+                const chip = calEl('span', 'cal-filter' + (calState.hidden.has(key) ? ' off' : ''));
+                chip.style.setProperty('--c', t.color);
+                chip.title = calState.hidden.has(key) ? 'Mostrar' : 'Ocultar';
+                chip.append(calEl('span', 'dot'), calEl('span', '', t.label), calEl('span', 'count', count));
+                chip.addEventListener('click', () => {
+                    calState.hidden.has(key) ? calState.hidden.delete(key) : calState.hidden.add(key);
+                    renderCalendar();
+                });
+                wrap.appendChild(chip);
+            });
+        }
+
+        function renderCalendar() {
+            const { year, month } = calState;
+            document.getElementById('cal-title').textContent = `${MONTHS[month]} ${year}`;
+            renderCalFilters();
+            const grid = document.getElementById('cal-grid');
+            grid.innerHTML = '';
+            if (calState.error) {
+                grid.appendChild(calEl('div', 'cal-status', calState.error));
+                document.getElementById('cal-footer').innerHTML = '';
+                return;
+            }
+            const first = new Date(year, month, 1);
+            const start = new Date(year, month, 1 - ((first.getDay() + 6) % 7));  // lunes
+            const weeks = Math.ceil((((first.getDay() + 6) % 7) + new Date(year, month + 1, 0).getDate()) / 7);
+            grid.style.gridTemplateRows = `repeat(${weeks}, minmax(0, 1fr))`;
+            const todayIso = toIso(new Date());
+            // Cuántas actividades caben por día según la altura real de la celda (~19px cada una)
+            const cellH = grid.clientHeight / weeks;
+            const MAX_PILLS = Math.max(2, Math.floor((cellH - 44) / 19));
+
+            for (let i = 0; i < weeks * 7; i += 1) {
+                const d = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i);
+                const iso = toIso(d);
+                const evs = eventsOn(iso);
+                const cell = calEl('div', 'cal-day');
+                if (d.getMonth() !== month) cell.classList.add('out');
+                if (iso === todayIso) cell.classList.add('today');
+                cell.appendChild(calEl('span', 'cal-day-num', d.getDate()));
+                if (evs.length) {
+                    cell.classList.add('has-events');
+                    cell.title = `${evs.length} actividad(es)`;
+                    cell.addEventListener('click', () => openDayList(iso));
+                    evs.slice(0, MAX_PILLS).forEach(ev => {
+                        const pill = calEl('div', 'cal-pill' + (ev.done ? ' done' : ''), (ev.pillPrefix || '') + ev.title);
+                        pill.style.setProperty('--c', CAL_TYPES[ev.type].color);
+                        pill.title = `${CAL_TYPES[ev.type].label}: ${ev.title}`;
+                        pill.addEventListener('click', e => { e.stopPropagation(); openEventDetail(ev); });
+                        cell.appendChild(pill);
+                    });
+                    if (evs.length > MAX_PILLS) cell.appendChild(calEl('div', 'cal-more', `+${evs.length - MAX_PILLS} más`));
+                }
+                grid.appendChild(cell);
+            }
+
+            const footer = document.getElementById('cal-footer');
+            footer.innerHTML = '';
+            const prefix = `${year}-${String(month + 1).padStart(2, '0')}-`;
+            const monthEvs = visibleEvents(calState.events.filter(e => e.date.startsWith(prefix)));
+            const pending = monthEvs.filter(e => !e.done).length;
+            footer.appendChild(calEl('span', '', monthEvs.length
+                ? `Este mes: ${monthEvs.length} actividad(es) · ${pending} pendiente(s)`
+                : 'Sin actividades este mes'));
+            const undated = visibleEvents(calState.undated);
+            if (undated.length) {
+                const b = calEl('button', 'cal-btn', `${undated.length} pendiente(s) sin fecha`);
+                b.addEventListener('click', () => openEventList('Pendientes sin fecha', '', undated));
+                footer.appendChild(b);
+            }
+        }
+
+        // ---- Modal de detalle / lista ----
+        const calDetailOverlay = document.getElementById('cal-detail-overlay');
+        const calDetail = document.getElementById('cal-detail');
+
+        function closeCalDetail() { googlePanelOpen = false; calDetailOverlay.classList.remove('active'); }
+
+        // Texto con enlaces http(s) clicables (se abren en pestaña nueva). El resto
+        // se inserta como texto; los enlaces largos se muestran abreviados.
+        const URL_RE = /https?:\/\/[^\s<>"']+/g;
+
+        function shortUrl(url) {
+            try {
+                const u = new URL(url);
+                const path = decodeURIComponent(u.pathname).replace(/\/$/, '');
+                const text = u.host + (path.length > 28 ? path.slice(0, 28) + '…' : path);
+                return (u.search || u.hash) && path.length <= 28 ? text + '…' : text;
+            } catch { return url.length > 60 ? url.slice(0, 57) + '…' : url; }
+        }
+
+        async function copyText(text) {
+            // Primero la copia directa: funciona con el clic del usuario y no pide
+            // permiso (navigator.clipboard puede quedar esperando uno en páginas internas).
+            const ta = document.createElement('textarea');
+            ta.value = text;
+            ta.setAttribute('readonly', '');
+            ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0;pointer-events:none';
+            document.body.appendChild(ta);
+            ta.select();
+            let ok = false;
+            try { ok = document.execCommand('copy'); } catch (_) { ok = false; }
+            ta.remove();
+            if (ok) return true;
+            try {
+                await Promise.race([
+                    navigator.clipboard.writeText(text),
+                    new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 1500)),
+                ]);
+                return true;
+            } catch (_) {
+                return false;
+            }
+        }
+
+        function copyLinkButton(url) {
+            const b = calEl('button', 'cal-copy-btn');
+            b.type = 'button';
+            b.title = 'Copiar enlace';
+            b.setAttribute('aria-label', 'Copiar enlace');
+            const icon = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+            b.innerHTML = icon;
+            let timer = null;
+            b.addEventListener('click', async e => {
+                e.preventDefault();
+                e.stopPropagation();
+                const ok = await copyText(url);
+                b.classList.toggle('copied', ok);
+                b.textContent = ok ? '✓ Copiado' : 'No se pudo copiar';
+                clearTimeout(timer);
+                timer = setTimeout(() => { b.classList.remove('copied'); b.innerHTML = icon; }, 1600);
+            });
+            return b;
+        }
+
+        function linkifiedDd(value) {
+            const dd = calEl('dd');
+            const text = String(value);
+            let last = 0;
+            for (const m of text.matchAll(URL_RE)) {
+                const url = m[0].replace(/[).,;:!?\]]+$/, '');  // puntuación final no es parte del enlace
+                if (m.index > last) dd.append(document.createTextNode(text.slice(last, m.index)));
+                const a = calEl('a', '', shortUrl(url));
+                a.title = url;
+                a.addEventListener('click', e => { e.preventDefault(); window.open(url, '_blank'); });
+                dd.append(a, copyLinkButton(url));
+                last = m.index + url.length;
+            }
+            if (last < text.length) dd.append(document.createTextNode(text.slice(last)));
+            return dd;
+        }
+
+        function detailActions(buttons) {
+            const row = calEl('div', 'cal-detail-actions');
+            buttons.forEach(([text, fn, cls]) => {
+                const b = calEl('button', 'cal-btn' + (cls ? ' ' + cls : ''), text);
+                b.addEventListener('click', fn);
+                row.appendChild(b);
+            });
+            return row;
+        }
+
+        function openEventDetail(ev, back = null) {
+            const t = CAL_TYPES[ev.type];
+            calDetail.innerHTML = '';
+            calDetail.style.setProperty('--c', t.color);
+            const type = calEl('div', 'cal-detail-type');
+            type.append(calEl('span', 'dot'), calEl('span', '', t.label));
+            const title = calEl('h4', ev.done ? 'done' : '', ev.title);
+            calDetail.append(type, title);
+            if (ev.date) calDetail.appendChild(calEl('div', 'cal-detail-date', longDate(ev.date)));
+
+            const dl = calEl('dl', 'cal-fields');
+            if (ev.status) {
+                dl.append(calEl('dt', '', 'Estado'));
+                const dd = calEl('dd');
+                dd.appendChild(calEl('span', 'cal-badge', ev.status));
+                dl.appendChild(dd);
+            }
+            ev.fields.filter(([, v]) => v !== undefined && v !== null && String(v).trim() !== '')
+                .forEach(([k, v]) => dl.append(calEl('dt', '', k), linkifiedDd(v)));
+            calDetail.appendChild(dl);
+
+            const buttons = [];
+            if (back) buttons.push(['‹ Volver', back]);
+            buttons.push(['Cerrar', closeCalDetail]);
+            if (ev.type === 'google') {
+                if (/^https:\/\/(www\.)?google\.com\/calendar\//.test(ev.link || '')) {
+                    buttons.push(['Abrir en Google Calendar', () => window.open(ev.link, '_blank'), 'primary']);
+                }
+            } else {
+                buttons.push([`Abrir en ${t.label}`, () => goToAgendaTab(t.tab), 'primary']);
+            }
+            calDetail.appendChild(detailActions(buttons));
+            calDetailOverlay.classList.add('active');
+        }
+
+        function openEventList(heading, subheading, list) {
+            calDetail.innerHTML = '';
+            calDetail.style.removeProperty('--c');
+            calDetail.appendChild(calEl('h4', '', heading));
+            if (subheading) calDetail.appendChild(calEl('div', 'cal-detail-date', subheading));
+            const wrap = calEl('div', 'cal-list');
+            list.forEach(ev => {
+                const item = calEl('div', 'cal-list-item' + (ev.done ? ' done' : ''));
+                item.style.setProperty('--c', CAL_TYPES[ev.type].color);
+                item.append(calEl('span', 'dot'), calEl('span', 't', ev.title), calEl('span', 's', ev.status));
+                item.title = CAL_TYPES[ev.type].label;
+                item.addEventListener('click', () => openEventDetail(ev, () => openEventList(heading, subheading, list)));
+                wrap.appendChild(item);
+            });
+            calDetail.appendChild(wrap);
+            calDetail.appendChild(detailActions([['Cerrar', closeCalDetail]]));
+            calDetailOverlay.classList.add('active');
+        }
+
+        function openDayList(iso) {
+            const evs = eventsOn(iso);
+            if (evs.length === 1) return openEventDetail(evs[0]);
+            openEventList(`${evs.length} actividades`, longDate(iso), evs);
+        }
+
+        // ---- Google Calendar ----
+        let googlePanelOpen = false;
+        const GOOGLE_AUTO_SYNC_MIN = 10;  // al abrir el calendario, sincroniza si pasó más de esto
+
+        async function refreshGoogleStatus() {
+            const py = await calBridge;
+            if (!py || !py.google_status) return null;
+            try { calState.google = JSON.parse(await py.google_status()); } catch (_) { calState.google = null; }
+            const g = calState.google || {};
+            const btn = document.getElementById('cal-google');
+            btn.classList.toggle('connected', !!g.connected && !g.error);
+            btn.classList.toggle('busy', !!g.busy);
+            btn.classList.toggle('error', !!g.error);
+            btn.title = g.busy === 'syncing' ? 'Sincronizando con Google…'
+                : g.connected ? `Conectado a Google${g.email ? ' como ' + g.email : ''}` : 'Conectar con Google Calendar';
+            return g;
+        }
+
+        function formatSyncTime(iso) {
+            if (!iso) return 'nunca';
+            const d = new Date(iso);
+            return isNaN(d) ? iso : d.toLocaleString('es', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+        }
+
+        function gsLink(text, url) {
+            const a = calEl('a', '', text);
+            a.addEventListener('click', () => window.open(url, '_blank'));
+            return a;
+        }
+
+        function gsStep(...parts) {
+            const li = document.createElement('li');
+            parts.forEach(p => li.append(typeof p === 'string' ? document.createTextNode(p) : p));
+            return li;
+        }
+
+        async function renderGooglePanel() {
+            const py = await calBridge;
+            const g = await refreshGoogleStatus() || {};
+            if (!googlePanelOpen) return;
+            calDetail.innerHTML = '';
+            calDetail.style.setProperty('--c', '#4285f4');
+            const type = calEl('div', 'cal-detail-type');
+            type.append(calEl('span', 'dot'), calEl('span', '', 'Google Calendar'));
+            calDetail.append(type);
+            const buttons = [];
+            const close = () => { googlePanelOpen = false; closeCalDetail(); };
+
+            if (g.connected) {
+                calDetail.appendChild(calEl('h4', '', g.email ? `Conectado como ${g.email}` : 'Cuenta conectada'));
+                calDetail.appendChild(calEl('div', 'gs-text',
+                    g.busy === 'syncing' ? 'Sincronizando…' : `Última sincronización: ${formatSyncTime(g.lastSync)}`));
+                calDetail.appendChild(calEl('div', 'gs-muted',
+                    `${g.events} evento(s) de Google en el calendario · ${g.pushed} actividad(es) de Minichrome enviadas al calendario «Minichrome» de tu cuenta.`));
+                calDetail.appendChild(calEl('div', 'gs-muted',
+                    'Las actividades se sincronizan de Minichrome hacia Google: los cambios que hagas a esas copias en Google se reemplazan en la siguiente sincronización. Tus otros calendarios de Google no se modifican.'));
+                buttons.push(['Desconectar', () => { if (confirmDisconnect()) py.google_disconnect(); }, 'danger']);
+                buttons.push(['Cerrar', close]);
+                buttons.push([g.busy === 'syncing' ? 'Sincronizando…' : 'Sincronizar ahora', () => py.google_sync(), 'primary']);
+            } else if (g.busy === 'connecting') {
+                calDetail.appendChild(calEl('h4', '', 'Esperando autorización…'));
+                calDetail.appendChild(calEl('div', 'gs-text',
+                    'Se abrió el inicio de sesión de Google en tu navegador. Elige tu cuenta y concede el acceso; al terminar, vuelve aquí.'));
+                calDetail.appendChild(calEl('div', 'gs-muted',
+                    'Google avisará que «no verificó esta app»: es normal porque es tu propia app. Pulsa «Configuración avanzada» → «Ir a …».'));
+                buttons.push(['Cancelar', () => py.google_cancel_connect()]);
+            } else {
+                calDetail.appendChild(calEl('h4', '', 'Conectar con Google Calendar'));
+                calDetail.appendChild(calEl('div', 'gs-text',
+                    'Tus eventos de Google aparecerán en este calendario, y tus actividades con fecha se copiarán a un calendario «Minichrome» en tu cuenta.'));
+                if (!g.configured) {
+                    calDetail.appendChild(calEl('div', 'gs-muted', 'Configuración única (unos 5 minutos). Google exige que cada usuario cree sus propias credenciales:'));
+                    const ol = calEl('ol', 'gs-steps');
+                    ol.append(
+                        gsStep(gsLink('Crea un proyecto', 'https://console.cloud.google.com/projectcreate'), ' en Google Cloud (por ejemplo «Minichrome»).'),
+                        gsStep(gsLink('Activa Google Calendar API', 'https://console.cloud.google.com/apis/library/calendar-json.googleapis.com'), ' en ese proyecto.'),
+                        gsStep('En ', gsLink('Google Auth Platform', 'https://console.cloud.google.com/auth/overview'), ' configura la pantalla de consentimiento como ', calEl('b', '', 'Externa'), ' y agrega tu correo en «Público → Usuarios de prueba».'),
+                        gsStep('En ', gsLink('Clientes', 'https://console.cloud.google.com/auth/clients'), ' crea un cliente de tipo ', calEl('b', '', 'App de escritorio'), ' y descarga el JSON.'),
+                        gsStep('Pulsa ', calEl('b', '', '«Elegir archivo JSON…»'), ' aquí abajo y selecciónalo.'),
+                    );
+                    calDetail.appendChild(ol);
+                    calDetail.appendChild(calEl('div', 'gs-muted',
+                        'Mientras la app esté en modo «Prueba», Google pide volver a conectar cada 7 días; para evitarlo, en «Público» pulsa «Publicar app». El archivo y la sesión se guardan en el llavero del sistema.'));
+                } else {
+                    calDetail.appendChild(calEl('div', 'gs-muted', `Credenciales cargadas (${g.clientId}…). Pulsa «Conectar» para iniciar sesión en tu navegador.`));
+                }
+                buttons.push(['Cerrar', close]);
+                buttons.push([g.configured ? 'Cambiar archivo JSON…' : 'Elegir archivo JSON…', () => py.google_select_credentials(), g.configured ? '' : 'primary']);
+                if (g.configured) buttons.push(['Conectar con Google', () => py.google_connect(), 'primary']);
+            }
+            if (g.error) calDetail.appendChild(calEl('div', 'gs-error', g.error));
+            calDetail.appendChild(detailActions(buttons));
+            calDetailOverlay.classList.add('active');
+        }
+
+        function confirmDisconnect() {
+            // Modal nativo simple: la acción es reversible (se puede volver a conectar)
+            return window.confirm('¿Desconectar tu cuenta de Google? El calendario «Minichrome» quedará en tu cuenta de Google (puedes borrarlo allí).');
+        }
+
+        function openGooglePanel() {
+            googlePanelOpen = true;
+            renderGooglePanel();
+        }
+
+        calBridge.then(py => {
+            if (!py || !py.google_changed) return;
+            py.google_changed.connect(async () => {
+                const g = await refreshGoogleStatus();
+                if (googlePanelOpen && calDetailOverlay.classList.contains('active')) renderGooglePanel();
+                // Tras sincronizar, recargar lo que muestra el calendario
+                if (g && !g.busy && calOverlay.classList.contains('active')) {
+                    try { await loadCalendarData(); renderCalendar(); } catch (_) {}
+                }
+            });
+        });
+
+        async function maybeAutoSync() {
+            const py = await calBridge;
+            const g = await refreshGoogleStatus();
+            if (!py || !g || !g.connected || g.busy) return;
+            const last = g.lastSync ? new Date(g.lastSync).getTime() : 0;
+            if (Date.now() - last > GOOGLE_AUTO_SYNC_MIN * 60000) py.google_sync();
+        }
+
+        // ---- Abrir / navegar ----
+        const calOverlay = document.getElementById('cal-overlay');
+
+        let calRestoreBar = false;  // la barra estaba visible al abrir el calendario
+
+        async function openCalendar() {
+            calBridge.then(async py => {
+                if (!py || !py.hide_browser_bar) return;
+                calRestoreBar = py.is_browser_bar_open ? await py.is_browser_bar_open() : false;
+                if (calRestoreBar) py.hide_browser_bar();
+            });
+            const now = new Date();
+            calState.year = now.getFullYear();
+            calState.month = now.getMonth();
+            calState.error = '';
+            calOverlay.classList.add('active');
+            document.getElementById('cal-grid').innerHTML = '<div class="cal-status">Cargando actividades…</div>';
+            maybeAutoSync();
+            try {
+                await loadCalendarData();
+            } catch (err) {
+                calState.error = 'No se pudieron cargar las actividades: ' + (err && err.message ? err.message : err);
+            }
+            renderCalendar();
+        }
+
+        function closeCalendar() {
+            closeCalDetail();
+            calOverlay.classList.remove('active');
+            if (calRestoreBar) {
+                calRestoreBar = false;
+                calBridge.then(py => py && py.show_browser_bar && py.show_browser_bar());
+            }
+        }
+
+        function shiftMonth(delta) {
+            const d = new Date(calState.year, calState.month + delta, 1);
+            calState.year = d.getFullYear();
+            calState.month = d.getMonth();
+            renderCalendar();
+        }
+
+        const clockWrap = document.getElementById('clock-wrap');
+        clockWrap.addEventListener('click', openCalendar);
+        clockWrap.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openCalendar(); } });
+        document.getElementById('cal-prev').addEventListener('click', () => shiftMonth(-1));
+        document.getElementById('cal-next').addEventListener('click', () => shiftMonth(1));
+        document.getElementById('cal-today').addEventListener('click', () => {
+            const now = new Date();
+            calState.year = now.getFullYear();
+            calState.month = now.getMonth();
+            renderCalendar();
+        });
+        document.getElementById('cal-close').addEventListener('click', closeCalendar);
+        document.getElementById('cal-google').addEventListener('click', openGooglePanel);
+        calOverlay.addEventListener('click', e => { if (e.target === calOverlay) closeCalendar(); });
+        calDetailOverlay.addEventListener('click', e => { if (e.target === calDetailOverlay) closeCalDetail(); });
+
+        document.addEventListener('keydown', e => {
+            if (!calOverlay.classList.contains('active')) return;
+            if (e.key === 'Escape') {
+                e.preventDefault();  // que Esc no oculte también la barra del navegador
+                calDetailOverlay.classList.contains('active') ? closeCalDetail() : closeCalendar();
+            } else if (!calDetailOverlay.classList.contains('active') && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+                e.preventDefault();
+                shiftMonth(e.key === 'ArrowLeft' ? -1 : 1);
+            }
+        });
     </script>
 </body>
 </html>

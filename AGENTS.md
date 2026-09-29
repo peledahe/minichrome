@@ -23,6 +23,7 @@
     - `pw` (`PasswordBridge`) for password CRUD and password auto-save policy.
   - `browser.py`: web profile (`profile()`), `WebPage` (password capture/autofill, bridge exposure only on internal pages), `WebView`.
   - `window.py`: main window `Minichrome` (tabs, bar, panels, shortcuts, "⋮" menu).
+  - `google_sync.py`: Google Calendar sync (desktop OAuth + PKCE, stdlib HTTP). OAuth client JSON and refresh token live in the system keyring; Google events are cached in `google_events`; dated activities are mirrored (all-day events tagged with `extendedProperties.private.mcKey`) into a dedicated "Minichrome" calendar. Exposed to `ui/newtab.html` (calendar modal) via `py.google_*` slots and the `google_changed` signal.
   - `main.py`: entrypoint only (env flags, `QApplication`, password migration, window).
 - `browser_features.py`
   - Standard browser features wired from `browser.py`/`window.py`: downloads panel (Ctrl+J), find bar (Ctrl+F), DevTools (F12), print/PDF (Ctrl+P), per-site permission prompts, certificate-error dialog, crashed-tab overlay.

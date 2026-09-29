@@ -24,6 +24,8 @@ def _db():
     c.execute("CREATE TABLE IF NOT EXISTS video_tags(url TEXT PRIMARY KEY, data TEXT, scope TEXT DEFAULT '')")
     c.execute("CREATE TABLE IF NOT EXISTS video_playback(url TEXT PRIMARY KEY, time REAL)")
     c.execute("CREATE TABLE IF NOT EXISTS video_playlists(id INTEGER PRIMARY KEY, name TEXT, items TEXT)")
+    # Caché de solo lectura de eventos de Google Calendar (google_sync.py la reemplaza en cada sincronización)
+    c.execute("CREATE TABLE IF NOT EXISTS google_events(id TEXT PRIMARY KEY, calendar TEXT, title TEXT, start_date TEXT, end_date TEXT, start_time TEXT DEFAULT '', end_time TEXT DEFAULT '', all_day INTEGER DEFAULT 0, location TEXT DEFAULT '', description TEXT DEFAULT '', link TEXT DEFAULT '', color TEXT DEFAULT '')")
     
     c.execute("CREATE TABLE IF NOT EXISTS app_config(key TEXT PRIMARY KEY, val TEXT)")
     c.execute("CREATE TABLE IF NOT EXISTS passwords(id INTEGER PRIMARY KEY, site TEXT, username TEXT, password TEXT, type TEXT DEFAULT 'web', url TEXT DEFAULT '', notes TEXT DEFAULT '', ts DATETIME DEFAULT CURRENT_TIMESTAMP)")

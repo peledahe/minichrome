@@ -1,19 +1,22 @@
 """Bridges QWebChannel: `py` (AgendaBridge) y `pw` (PasswordBridge)."""
 import os
+import json
 import base64
 import shutil
 import subprocess
 from datetime import datetime
-from PyQt6.QtWidgets import QApplication
-from PyQt6.QtCore import QUrl, QObject, pyqtSlot, pyqtSignal
+from PyQt6.QtWidgets import QApplication, QFileDialog
+from PyQt6.QtCore import QUrl, QObject, pyqtSlot, pyqtSignal, QStandardPaths
 from PyQt6.QtGui import QImage
 from secure_store import encrypt, decrypt
+import google_sync
 from db import _db, cleanup_original_screenshot, get_screenshots_dir, save_screenshot
 
 # ─── Puente Agenda (Python <=> JS) ───────────────────────────────────────────
 class AgendaBridge(QObject):
 
     updated = pyqtSignal()
+    google_changed = pyqtSignal()  # estado o datos de Google Calendar cambiaron
 
     @pyqtSlot()
     def close_app(self):
@@ -21,6 +24,40 @@ class AgendaBridge(QObject):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        google_sync.manager().changed.connect(self.google_changed)
+
+    # ─── Google Calendar (google_sync.py) ─────────────────────────────────────
+    @pyqtSlot(result=str)
+    def google_status(self):
+        return json.dumps(google_sync.manager().status())
+
+    @pyqtSlot()
+    def google_select_credentials(self):
+        start = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DownloadLocation)
+        path, _ = QFileDialog.getOpenFileName(self.parent(), "Credenciales OAuth de Google (JSON)",
+                                              start, "JSON (*.json)")
+        if path:
+            google_sync.manager().set_client_file(path)
+
+    @pyqtSlot()
+    def google_connect(self):
+        google_sync.manager().connect()
+
+    @pyqtSlot()
+    def google_cancel_connect(self):
+        google_sync.manager().cancel_connect()
+
+    @pyqtSlot()
+    def google_sync(self):
+        google_sync.manager().sync()
+
+    @pyqtSlot()
+    def google_disconnect(self):
+        google_sync.manager().disconnect()
+
+    @pyqtSlot(result=str)
+    def get_google_events(self):
+        return json.dumps(google_sync.manager().events())
 
     @pyqtSlot(result=list)
     def get_agenda(self):
@@ -1038,6 +1075,11 @@ class AgendaBridge(QObject):
         mw = self.parent().main_win
         if mw and not mw._bar_open:
             mw._show_bar()
+
+    @pyqtSlot(result=bool)
+    def is_browser_bar_open(self):
+        mw = self.parent().main_win
+        return bool(mw and mw._bar_open)
 
 
 class PasswordBridge(QObject):
