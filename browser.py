@@ -41,7 +41,9 @@ class DomainUAInterceptor(QWebEngineUrlRequestInterceptor):
         info.setHttpHeader(b"Accept-Language", b"es-ES,es;q=0.9,en;q=0.8")
         
         host = (url.host() or "").lower()
-        if "accounts.google.com" in host or "mail.google.com" in host:
+        # Solo el inicio de sesión de Google: en Gmail el UA de Firefox 124 hace
+        # que muestre "Ya no se admite esta versión" (el motor real es Chrome 140).
+        if host == "accounts.google.com":
             info.setHttpHeader(b"User-Agent", self._ff_ua)
 
 
