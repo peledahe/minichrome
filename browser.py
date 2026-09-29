@@ -16,7 +16,8 @@ from PyQt6.QtWebEngineCore import (
 )
 from PyQt6.QtWebChannel import QWebChannel
 from PyQt6.QtCore import QUrl, Qt, QObject
-from config import CACHE, DB, SPELL_LANG, is_internal_url, load_quick_links, save_quick_links
+from config import (CACHE, DB, SPELL_LANG, is_internal_url, load_quick_links, save_quick_links,
+                    load_search_engines, save_search_engines)
 from secure_store import encrypt, decrypt
 from db import _db, get_config, save_history
 from widgets import BTN_NAV, Notif
@@ -40,9 +41,9 @@ class DomainUAInterceptor(QWebEngineUrlRequestInterceptor):
             
         info.setHttpHeader(b"Accept-Language", b"es-ES,es;q=0.9,en;q=0.8")
         
-        host = (url.host() or "").lower()
         # Solo el inicio de sesión de Google: en Gmail el UA de Firefox 124 hace
         # que muestre "Ya no se admite esta versión" (el motor real es Chrome 140).
+        host = (url.host() or "").lower()
         if host == "accounts.google.com":
             info.setHttpHeader(b"User-Agent", self._ff_ua)
 
@@ -450,12 +451,21 @@ class WebPage(QWebEnginePage):
                 channel.registerObject(name, obj)
             self._bridges_published = True
 
+    def _sync_remote_access(self, url):
+        """Solo las páginas propias (ui/) pueden cargar recursos remotos, como
+        los favicons de la página de inicio. Otros archivos locales no."""
+        attr = QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls
+        internal = is_internal_url(url)
+        if self.settings().testAttribute(attr) != internal:
+            self.settings().setAttribute(attr, internal)
+
     def acceptNavigationRequest(self, url, nav_type, is_main_frame):
         # Retira los bridges antes de salir hacia un sitio externo; el registro
         # solo ocurre al confirmarse la URL interna (urlChanged), cuando el
         # documento externo anterior ya no existe.
         if is_main_frame:
             self._sync_bridges(url, allow_register=False)
+            self._sync_remote_access(url)
         return super().acceptNavigationRequest(url, nav_type, is_main_frame)
 
     def _normalized_host(self, value: str) -> str:
@@ -735,6 +745,9 @@ class WebPage(QWebEnginePage):
         if message.startswith("MINICHROME_LINKS:"):
             if is_internal_url(page_url):
                 save_quick_links(message[len("MINICHROME_LINKS:"):])
+        elif message.startswith("MINICHROME_ENGINES:"):
+            if is_internal_url(page_url):
+                save_search_engines(message[len("MINICHROME_ENGINES:"):])
         elif message.startswith("MINICHROME_AUTOFILL_REQUEST:"):
             try:
                 if page_url.scheme() not in ("http", "https"):
@@ -895,6 +908,10 @@ class WebView(QWebEngineView):
                 if links is not None:
                     import json as _json
                     js = f"window._miniLinks = {_json.dumps(links)}; if (typeof renderLinks === 'function') renderLinks();"
+                    self.page().runJavaScript(js)
+                engines = load_search_engines()
+                if engines is not None:
+                    js = f"window._miniEngines = {json.dumps(engines)}; if (typeof renderEngines === 'function') renderEngines();"
                     self.page().runJavaScript(js)
         else:
             save_history(self.title(), url)

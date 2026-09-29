@@ -441,6 +441,42 @@
         }
         .ql-error.show { display: block; }
 
+        /* Administrar buscadores */
+        .engine-chip.engine-manage { padding: 0 7px; color: rgba(255,255,255,0.4); }
+        .engine-chip.engine-manage:hover { color: var(--accent2); }
+        .ql-modal.eng-modal { width: min(600px, 92vw); }
+        .eng-hint { font-size: 0.78rem; color: rgba(255,255,255,0.45); margin-top: -8px; }
+        .eng-hint code { color: var(--accent2); }
+        .eng-list {
+            display: flex; flex-direction: column; gap: 6px;
+            max-height: 48vh; overflow-y: auto; padding-right: 4px;
+        }
+        .eng-row {
+            display: grid;
+            grid-template-columns: 16px 130px 1fr auto;
+            gap: 8px; align-items: center;
+        }
+        .eng-row img { width: 16px; height: 16px; border-radius: 4px; }
+        .ql-modal .eng-row input { padding: 6px 10px; font-size: 0.8rem; border-radius: 8px; }
+        .ql-modal .eng-row.invalid input { border-color: #ff6b6b; }
+        .eng-row-actions { display: flex; gap: 2px; }
+        .eng-icon-btn {
+            background: none; border: 1px solid transparent; border-radius: 6px;
+            color: rgba(255,255,255,0.45); cursor: pointer; width: 24px; height: 24px;
+            display: flex; align-items: center; justify-content: center; font-size: 0.8rem;
+        }
+        .eng-icon-btn:hover:not(:disabled) { color: #fff; background: rgba(255,255,255,0.08); }
+        .eng-icon-btn.danger:hover:not(:disabled) { color: #ff6b6b; }
+        .eng-icon-btn:disabled { opacity: 0.25; cursor: default; }
+        .eng-add-btn {
+            align-self: flex-start; background: none; border: 1px dashed rgba(255,255,255,0.18);
+            border-radius: 8px; color: rgba(255,255,255,0.55); cursor: pointer;
+            font-family: 'Outfit', sans-serif; font-size: 0.8rem; padding: 6px 12px;
+        }
+        .eng-add-btn:hover:not(:disabled) { color: var(--accent2); border-color: var(--accent); }
+        .eng-add-btn:disabled { opacity: 0.35; cursor: default; }
+        .ql-modal-actions .spacer { flex: 1; }
+
         /* Reloj */
         .clock-wrap {
             position: fixed;
@@ -492,15 +528,8 @@
                 </svg>
             </button>
         </div>
-        <div class="search-engines">
-            <span class="engine-chip active" data-engine="google">Google</span>
-            <span class="engine-chip" data-engine="bing">Bing</span>
-            <span class="engine-chip" data-engine="youtube">YouTube</span>
-            <span class="engine-chip" data-engine="duckduckgo">DuckDuckGo</span>
-            <span class="engine-chip" data-engine="wikipedia">Wikipedia</span>
-            <span class="engine-chip" data-engine="reddit">Reddit</span>
-            <span class="engine-chip" data-engine="github">GitHub</span>
-        </div>
+        <!-- Chips generados por renderEngines() (lista administrable) -->
+        <div class="search-engines" id="search-engines"></div>
     </div>
 
     <!-- Accesos a la app -->
@@ -582,6 +611,23 @@
         </div>
     </div>
 
+    <!-- Modal administrar buscadores -->
+    <div class="ql-modal-overlay" id="eng-modal">
+        <div class="ql-modal eng-modal">
+            <h3>Buscadores</h3>
+            <div class="eng-hint">Escribe <code>%s</code> en la URL donde debe ir el texto buscado. El primero de la lista es el predeterminado.</div>
+            <div class="eng-list" id="eng-list"></div>
+            <button class="eng-add-btn" id="eng-add-btn">+ Agregar buscador</button>
+            <div class="ql-error" id="eng-error"></div>
+            <div class="ql-modal-actions">
+                <button class="ql-btn ghost" id="eng-reset-btn" title="Volver a la lista original">Restablecer</button>
+                <span class="spacer"></span>
+                <button class="ql-btn ghost" id="eng-cancel-btn">Cancelar</button>
+                <button class="ql-btn primary" id="eng-save-btn">Guardar</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Reloj -->
     <div class="clock-wrap">
         <div class="clock-time" id="clock-time">00:00</div>
@@ -646,13 +692,15 @@
         }
 
         function faviconCandidatesFromUrl(url) {
-            const domain = domainFromUrl(url);
-            if (!domain) return [];
+            // Solo el origen (esquema + host + puerto): con ruta o #fragmento
+            // Google devuelve el icono genérico, y el puerto hace falta para
+            // sitios internos como https://host:7272.
+            let origin;
+            try { origin = new URL(url).origin; } catch { return []; }
+            if (!origin || origin === 'null') return [];
             return [
-                `https://www.google.com/s2/favicons?sz=64&domain_url=${encodeURIComponent(url)}`,
-                `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=64`,
-                `https://icons.duckduckgo.com/ip3/${domain}.ico`,
-                `https://${domain}/favicon.ico`,
+                `https://www.google.com/s2/favicons?sz=64&domain_url=${encodeURIComponent(origin)}`,
+                `${origin}/favicon.ico`,
             ];
         }
 
@@ -679,55 +727,34 @@
         }
 
         function setFaviconWithFallback(img, candidates, fallbackLabel = '') {
-            if (!img || !candidates.length) {
-                if (img) img.style.display = 'none';
-                return;
-            }
+            if (!img) return;
+            // La letra se ve de inmediato; el favicon real la reemplaza si carga.
+            const letter = createFallbackFavicon(fallbackLabel, candidates[0] || fallbackLabel);
+            img.onerror = null;
+            img.src = letter;
+            const token = String(Math.random());
+            img.dataset.faviconToken = token;
 
             let idx = 0;
-            img.onerror = () => {
-                idx += 1;
-                if (idx < candidates.length) {
-                    img.src = candidates[idx];
-                } else {
-                    img.onerror = null;
-                    img.src = createFallbackFavicon(fallbackLabel, candidates[0] || fallbackLabel);
-                }
+            const tryNext = () => {
+                if (img.dataset.faviconToken !== token || idx >= candidates.length) return;
+                const src = candidates[idx++];
+                const probe = new Image();
+                let done = false;
+                const fail = () => { if (!done) { done = true; tryNext(); } };
+                const timer = setTimeout(fail, 5000);  // servidor que no responde
+                probe.onerror = () => { clearTimeout(timer); fail(); };
+                probe.onload = () => {
+                    clearTimeout(timer);
+                    if (done) return;
+                    // Google devuelve un globo genérico de 16px si el sitio no tiene favicon.
+                    if (src.includes('google.com/s2/favicons') && probe.naturalWidth <= 16) return fail();
+                    done = true;
+                    if (img.dataset.faviconToken === token) img.src = src;
+                };
+                probe.src = src;
             };
-            img.src = candidates[idx];
-        }
-
-        function renderEngineFavicons(root = document) {
-            const engineHomeByKey = {
-                google: 'https://www.google.com',
-                bing: 'https://www.bing.com',
-                youtube: 'https://www.youtube.com',
-                duckduckgo: 'https://duckduckgo.com',
-                wikipedia: 'https://www.wikipedia.org',
-                reddit: 'https://www.reddit.com',
-                github: 'https://www.github.com',
-            };
-
-            root.querySelectorAll('.engine-chip').forEach(chip => {
-                if (chip.dataset.hasFavicon === '1') return;
-
-                const key = (chip.dataset.engine || '').toLowerCase();
-                const label = chip.textContent.trim();
-                const homeUrl = engineHomeByKey[key] || `https://${key}.com`;
-
-                chip.textContent = '';
-                const img = document.createElement('img');
-                img.alt = '';
-                setFaviconWithFallback(img, faviconCandidatesFromUrl(homeUrl), label);
-
-                const text = document.createElement('span');
-                text.className = 'chip-label';
-                text.textContent = label;
-
-                chip.appendChild(img);
-                chip.appendChild(text);
-                chip.dataset.hasFavicon = '1';
-            });
+            tryNext();
         }
 
         async function renderLinks() {
@@ -782,13 +809,6 @@
                     renderLinks();
                 });
             });
-        }
-
-        renderEngineFavicons();
-        const enginesWrap = document.querySelector('.search-engines');
-        if (enginesWrap) {
-            const enginesObserver = new MutationObserver(() => renderEngineFavicons(enginesWrap));
-            enginesObserver.observe(enginesWrap, { childList: true });
         }
 
         renderLinks();
@@ -847,25 +867,212 @@
             modal.classList.remove('active');
         }
 
-        // ---- Motores de búsqueda ----
-        const engines = {
-            google:     q => `https://www.google.com/search?q=${encodeURIComponent(q)}`,
-            bing:       q => `https://www.bing.com/search?q=${encodeURIComponent(q)}`,
-            youtube:    q => `https://www.youtube.com/results?search_query=${encodeURIComponent(q)}`,
-            duckduckgo: q => `https://duckduckgo.com/?q=${encodeURIComponent(q)}`,
-            wikipedia:  q => `https://es.wikipedia.org/wiki/Special:Search?search=${encodeURIComponent(q)}`,
-            reddit:     q => `https://www.reddit.com/search/?q=${encodeURIComponent(q)}`,
-            github:     q => `https://github.com/search?q=${encodeURIComponent(q)}&type=repositories`,
-        };
-        let activeEngine = 'google';
+        // ---- Motores de búsqueda (administrables) ----
+        // Plantillas con %s en el lugar del texto buscado. La lista editada se
+        // guarda en search_engines.json vía Python (window._miniEngines).
+        const DEFAULT_ENGINES = [
+            { name: 'Google',     url: 'https://www.google.com/search?q=%s' },
+            { name: 'Bing',       url: 'https://www.bing.com/search?q=%s' },
+            { name: 'YouTube',    url: 'https://www.youtube.com/results?search_query=%s' },
+            { name: 'Perplexity', url: 'https://www.perplexity.ai/search?q=%s' },
+            { name: 'ChatGPT',    url: 'https://chatgpt.com/?q=%s' },
+            { name: 'Claude',     url: 'https://claude.ai/new?q=%s' },
+            { name: 'Wikipedia',  url: 'https://es.wikipedia.org/wiki/Special:Search?search=%s' },
+            { name: 'Reddit',     url: 'https://www.reddit.com/search/?q=%s' },
+            { name: 'GitHub',     url: 'https://github.com/search?q=%s&type=repositories' },
+        ];
+        const MAX_ENGINES = 20;
+        let activeEngineName = '';
+        let userPickedEngine = false;  // si no, el activo es el primero de la lista
 
-        document.querySelectorAll('.engine-chip').forEach(chip => {
-            chip.addEventListener('click', () => {
-                document.querySelectorAll('.engine-chip').forEach(c => c.classList.remove('active'));
-                chip.classList.add('active');
-                activeEngine = chip.dataset.engine;
+        function loadEngines() {
+            const saved = Array.isArray(window._miniEngines) && window._miniEngines.length
+                ? window._miniEngines : DEFAULT_ENGINES;
+            return saved.map(e => ({ name: e.name, url: e.url }));
+        }
+
+        function saveEngines(list) {
+            const isDefault = JSON.stringify(list) === JSON.stringify(DEFAULT_ENGINES);
+            window._miniEngines = list;
+            // Lista vacía = volver a los predeterminados (Python borra el archivo)
+            console.log('MINICHROME_ENGINES:' + JSON.stringify(isDefault ? [] : list));
+        }
+
+        function isValidEngineUrl(url) {
+            if (!/^https?:\/\//i.test(url) || !url.includes('%s')) return false;
+            try { new URL(url.split('%s').join('x')); return true; } catch { return false; }
+        }
+
+        function engineHome(tpl) {
+            try { return new URL(tpl.split('%s').join('x')).origin; } catch { return ''; }
+        }
+
+        function renderEngines() {
+            const wrap = document.getElementById('search-engines');
+            const engines = loadEngines();
+            if (!userPickedEngine || !engines.some(e => e.name === activeEngineName)) {
+                activeEngineName = engines[0].name;
+            }
+            wrap.innerHTML = '';
+
+            engines.forEach(eng => {
+                const chip = document.createElement('span');
+                chip.className = 'engine-chip' + (eng.name === activeEngineName ? ' active' : '');
+                chip.title = eng.url.replace('%s', '…');
+
+                const img = document.createElement('img');
+                img.alt = '';
+                setFaviconWithFallback(img, faviconCandidatesFromUrl(engineHome(eng.url)), eng.name);
+                const label = document.createElement('span');
+                label.className = 'chip-label';
+                label.textContent = eng.name;
+                chip.append(img, label);
+
+                chip.addEventListener('click', () => {
+                    activeEngineName = eng.name;
+                    userPickedEngine = true;
+                    wrap.querySelectorAll('.engine-chip').forEach(c => c.classList.remove('active'));
+                    chip.classList.add('active');
+                    document.getElementById('search-input').focus();
+                });
+                wrap.appendChild(chip);
             });
+
+            const manage = document.createElement('span');
+            manage.className = 'engine-chip engine-manage';
+            manage.title = 'Administrar buscadores';
+            manage.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>';
+            manage.addEventListener('click', openEnginesModal);
+            wrap.appendChild(manage);
+        }
+
+        // ---- Modal administrar buscadores ----
+        const engModal = document.getElementById('eng-modal');
+        const engList  = document.getElementById('eng-list');
+        const engError = document.getElementById('eng-error');
+        let engDraft = [];
+
+        function openEnginesModal() {
+            engDraft = loadEngines();
+            engError.classList.remove('show');
+            renderEngineRows();
+            engModal.classList.add('active');
+        }
+
+        function closeEnginesModal() { engModal.classList.remove('active'); }
+
+        function syncDraftFromInputs() {
+            engList.querySelectorAll('.eng-row').forEach((row, i) => {
+                engDraft[i].name = row.querySelector('.eng-name').value;
+                engDraft[i].url  = row.querySelector('.eng-url').value;
+            });
+        }
+
+        function engIconButton(text, title, disabled, onClick, extraClass = '') {
+            const b = document.createElement('button');
+            b.className = 'eng-icon-btn ' + extraClass;
+            b.textContent = text;
+            b.title = title;
+            b.disabled = disabled;
+            b.addEventListener('click', () => { syncDraftFromInputs(); onClick(); });
+            return b;
+        }
+
+        function renderEngineRows(focusIndex = null) {
+            engList.innerHTML = '';
+            engDraft.forEach((eng, i) => {
+                const row = document.createElement('div');
+                row.className = 'eng-row';
+
+                const img = document.createElement('img');
+                img.alt = '';
+                setFaviconWithFallback(img, faviconCandidatesFromUrl(engineHome(eng.url)), eng.name || '?');
+
+                const name = document.createElement('input');
+                name.className = 'eng-name';
+                name.placeholder = 'Nombre';
+                name.maxLength = 40;
+                name.value = eng.name;
+
+                const url = document.createElement('input');
+                url.className = 'eng-url';
+                url.placeholder = 'https://ejemplo.com/buscar?q=%s';
+                url.value = eng.url;
+                url.addEventListener('change', () => {
+                    setFaviconWithFallback(img, faviconCandidatesFromUrl(engineHome(url.value.trim())), name.value || '?');
+                });
+
+                const actions = document.createElement('div');
+                actions.className = 'eng-row-actions';
+                const swap = (a, b) => { [engDraft[a], engDraft[b]] = [engDraft[b], engDraft[a]]; renderEngineRows(); };
+                actions.append(
+                    engIconButton('▲', 'Subir', i === 0, () => swap(i, i - 1)),
+                    engIconButton('▼', 'Bajar', i === engDraft.length - 1, () => swap(i, i + 1)),
+                    engIconButton('✕', 'Quitar', engDraft.length <= 1, () => { engDraft.splice(i, 1); renderEngineRows(); }, 'danger'),
+                );
+
+                row.append(img, name, url, actions);
+                engList.appendChild(row);
+            });
+            document.getElementById('eng-add-btn').disabled = engDraft.length >= MAX_ENGINES;
+            if (focusIndex !== null) {
+                const rows = engList.querySelectorAll('.eng-row');
+                if (rows[focusIndex]) rows[focusIndex].querySelector('.eng-name').focus();
+            }
+        }
+
+        document.getElementById('eng-add-btn').addEventListener('click', () => {
+            syncDraftFromInputs();
+            if (engDraft.length >= MAX_ENGINES) return;
+            engDraft.push({ name: '', url: '' });
+            renderEngineRows(engDraft.length - 1);
+            engList.scrollTop = engList.scrollHeight;
         });
+
+        document.getElementById('eng-reset-btn').addEventListener('click', () => {
+            engDraft = DEFAULT_ENGINES.map(e => ({ ...e }));
+            engError.classList.remove('show');
+            renderEngineRows();
+        });
+
+        document.getElementById('eng-cancel-btn').addEventListener('click', closeEnginesModal);
+        engModal.addEventListener('click', e => { if (e.target === engModal) closeEnginesModal(); });
+
+        document.getElementById('eng-save-btn').addEventListener('click', () => {
+            syncDraftFromInputs();
+            const list = engDraft.map(e => ({ name: e.name.trim(), url: e.url.trim() }));
+            const seen = new Set();
+            let firstError = '';
+            engList.querySelectorAll('.eng-row').forEach((row, i) => {
+                const { name, url } = list[i];
+                const key = name.toLowerCase();
+                let err = '';
+                if (!name) err = 'Cada buscador necesita un nombre.';
+                else if (seen.has(key)) err = `El nombre "${name}" está repetido.`;
+                else if (!isValidEngineUrl(url)) err = `La URL de "${name}" debe empezar con http(s):// e incluir %s.`;
+                seen.add(key);
+                row.classList.toggle('invalid', !!err);
+                if (err && !firstError) firstError = err;
+            });
+            if (firstError) {
+                engError.textContent = firstError;
+                engError.classList.add('show');
+                return;
+            }
+            saveEngines(list);
+            userPickedEngine = false;
+            renderEngines();
+            closeEnginesModal();
+        });
+
+        document.addEventListener('keydown', e => {
+            if (e.key === 'Escape' && engModal.classList.contains('active')) {
+                e.preventDefault();  // que Esc no oculte también la barra del navegador
+                closeEnginesModal();
+            }
+        });
+
+        renderEngines();
 
         function doSearch() {
             const input = document.getElementById('search-input');
@@ -875,7 +1082,9 @@
             if (/^https?:\/\//.test(q) || /^[\w-]+\.[a-z]{2,}/.test(q)) {
                 url = /^https?:\/\//.test(q) ? q : 'https://' + q;
             } else {
-                url = engines[activeEngine](q);
+                const engines = loadEngines();
+                const eng = engines.find(e => e.name === activeEngineName) || engines[0];
+                url = eng.url.split('%s').join(encodeURIComponent(q));
             }
             input.value = '';
             deskioNavigate(url);

@@ -9,6 +9,8 @@ CACHE = os.path.join(BASE, "web_cache")
 SCREENSHOTS_DIR = os.path.join(BASE, "memory_screenshots")
 DB    = os.path.join(BASE, "browser_data.db")
 LINKS_FILE    = os.path.join(BASE, "quick_links.json")
+ENGINES_FILE  = os.path.join(BASE, "search_engines.json")
+MAX_ENGINES   = 20
 SETTINGS_FILE = os.path.join(BASE, "settings.json")
 HOME  = f"file://{os.path.join(BASE, 'ui', 'newtab.html')}"
 UI_DIR = os.path.join(BASE, "ui")
@@ -64,3 +66,41 @@ def save_quick_links(data: str):
             json.dump(links, f, ensure_ascii=False, indent=2)
     except Exception as ex:
         print(f"[QuickLinks] Error al guardar: {ex}")
+
+
+def _valid_engines(data) -> list[dict]:
+    """Solo {name, url} con URL http(s) que contenga %s (lugar de la búsqueda)."""
+    if not isinstance(data, list):
+        raise ValueError("se esperaba una lista")
+    out = []
+    for item in data[:MAX_ENGINES]:
+        name = str((item or {}).get("name", "")).strip()[:40]
+        url = str((item or {}).get("url", "")).strip()
+        if name and "%s" in url and url.lower().startswith(("https://", "http://")):
+            out.append({"name": name, "url": url})
+    return out
+
+
+def load_search_engines():
+    """Buscadores de la página de inicio; None = usar los predeterminados del JS."""
+    try:
+        if os.path.exists(ENGINES_FILE):
+            with open(ENGINES_FILE, 'r', encoding='utf-8') as f:
+                engines = _valid_engines(json.load(f))
+                return engines or None
+    except Exception:
+        pass
+    return None
+
+
+def save_search_engines(data: str):
+    """Guarda la lista administrada desde la página de inicio (vacía = predeterminados)."""
+    try:
+        engines = _valid_engines(json.loads(data))
+        if engines:
+            with open(ENGINES_FILE, 'w', encoding='utf-8') as f:
+                json.dump(engines, f, ensure_ascii=False, indent=2)
+        elif os.path.exists(ENGINES_FILE):
+            os.remove(ENGINES_FILE)
+    except Exception as ex:
+        print(f"[Buscadores] Error al guardar: {ex}")

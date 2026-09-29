@@ -10,3 +10,4 @@
 /.clinerules
 /deploy.sh
 /browser_data.db.*.bak
+/search_engines.json
