@@ -2181,8 +2181,10 @@
         const calOverlay = document.getElementById('cal-overlay');
 
         let calRestoreBar = false;  // la barra estaba visible al abrir el calendario
+        const PAGE_TITLE = document.title;
 
         async function openCalendar() {
+            document.title = 'Calendario';  // nombre de la pestaña mientras está abierto
             calBridge.then(async py => {
                 if (!py || !py.hide_browser_bar) return;
                 calRestoreBar = py.is_browser_bar_open ? await py.is_browser_bar_open() : false;
@@ -2206,6 +2208,7 @@
             closeCalDetail();
             closeDayDrawer();
             calOverlay.classList.remove('active');
+            document.title = PAGE_TITLE;
             if (calRestoreBar) {
                 calRestoreBar = false;
                 calBridge.then(py => py && py.show_browser_bar && py.show_browser_bar());
