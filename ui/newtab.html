@@ -1362,18 +1362,25 @@
         });
 
         // ---- Visibilidad de módulos ----
-        (async () => {
-            try {
-                const savedSettings = localStorage.getItem('deskio_app_settings');
-                if (savedSettings) {
-                    const s = JSON.parse(savedSettings);
-                    if (s.videoEnabled === false)   document.getElementById('btn-goto-viewer').style.display = 'none';
-                    if (s.imagesEnabled === false)  document.getElementById('btn-goto-images').style.display = 'none';
-                    if (s.kanbanEnabled === false)  document.getElementById('btn-goto-kanban').style.display = 'none';
-                    if (s.notesEnabled === false)   document.getElementById('btn-goto-notes').style.display = 'none';
-                }
-            } catch (_) {}
-        })();
+        // Configuración → Módulos (app_config) decide qué accesos se ven. localStorage da el
+        // primer pintado sin parpadeo; luego manda el bridge (ver refreshModuleVisibility).
+        const MODULE_BUTTONS = {
+            videoEnabled: 'btn-goto-viewer',
+            imagesEnabled: 'btn-goto-images',
+            kanbanEnabled: 'btn-goto-kanban',
+            notesEnabled: 'btn-goto-notes',
+            arcadeEnabled: 'btn-goto-arcade',
+        };
+        function applyModuleVisibility(s) {
+            Object.entries(MODULE_BUTTONS).forEach(([key, id]) => {
+                const el = document.getElementById(id);
+                if (el && typeof s[key] === 'boolean') el.style.display = s[key] ? '' : 'none';
+            });
+        }
+        try {
+            const savedSettings = localStorage.getItem('deskio_app_settings');
+            if (savedSettings) applyModuleVisibility(JSON.parse(savedSettings));
+        } catch (_) {}
 
         function goToAgendaTab(tabName) {
             try {
@@ -1418,6 +1425,23 @@
                 if (typeof QWebChannel === 'undefined' || !window.qt || !qt.webChannelTransport) return resolve(null);
                 new QWebChannel(qt.webChannelTransport, ch => resolve(ch.objects.py || null));
             } catch (_) { resolve(null); }
+        });
+
+        async function refreshModuleVisibility() {
+            const py = await calBridge;
+            if (!py) return;
+            const keys = Object.keys(MODULE_BUTTONS);
+            const vals = await Promise.all(keys.map(k => py.get_config(k)));
+            const s = {};
+            // Mismo criterio que toBool(v, true) en agenda.js: sin valor = habilitado
+            keys.forEach((k, i) => { const v = vals[i]; s[k] = (v === '' || v == null) ? true : (v === '1' || v === 'true'); });
+            applyModuleVisibility(s);
+        }
+        refreshModuleVisibility();
+        // Si se cambia la configuración con la página de inicio abierta en otra pestaña
+        calBridge.then(py => py && py.updated && py.updated.connect(refreshModuleVisibility));
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') refreshModuleVisibility();
         });
 
         function calEl(tag, cls, text) {

@@ -7,16 +7,71 @@ from datetime import datetime
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QPushButton,
     QLabel, QSizePolicy, QFrame, QScrollArea, QListWidget, QListWidgetItem, QDialog,
-    QStackedLayout, QDateEdit, QMenu
+    QStackedLayout, QDateEdit, QMenu, QTreeWidget, QTreeWidgetItem, QAbstractItemView
 )
 from PyQt6.QtCore import (
-    QUrl, QUrlQuery, Qt, QTimer, QPropertyAnimation, QEasingCurve, QPoint, QRect, QDate
+    QUrl, QUrlQuery, Qt, QTimer, QPropertyAnimation, QEasingCurve, QPoint, QRect, QDate, QSize, pyqtSignal
 )
-from PyQt6.QtGui import QCursor, QFont, QIcon
+from PyQt6.QtGui import QColor, QCursor, QFont, QIcon
 from config import BASE, HOME, load_settings, save_settings
-from db import clear_history, clear_history_by_dates, clear_history_by_domain, del_fav, del_history, get_config, get_favs, get_history, get_screenshots_dir, get_url_history, save_fav, save_screenshot, set_config
+from db import (add_fav_folder, clear_history, clear_history_by_dates, clear_history_by_domain, del_fav, del_fav_folder, del_history,
+                get_config, get_fav_folders, get_favs_full, get_history, move_fav, rename_fav_folder, update_fav, get_screenshots_dir, get_url_history, save_fav, save_screenshot, set_config)
 from widgets import BTN_NAV, Notif, _shadow
 from browser import WebView, profile
+
+# ─── Árbol de favoritos (carpetas + arrastrar y soltar) ───────────────────────
+_FAV_ROLE = Qt.ItemDataRole.UserRole          # ("folder", id, nombre) | ("fav", id, folder_id, url, título)
+_FAV_KEY = Qt.ItemDataRole.UserRole + 1       # texto para el buscador
+_FAV_CHEVRON = Qt.ItemDataRole.UserRole + 2   # QLabel ▸/▾ de la carpeta
+
+_MENU_QSS = """
+    QMenu{background:#161c2e; border:1px solid rgba(120,160,255,0.22); border-radius:10px; padding:6px;}
+    QMenu::item{color:#e3e8f6; padding:7px 22px 7px 14px; border-radius:6px; font-size:12px;}
+    QMenu::item:selected{background:rgba(81,162,255,0.2); color:white;}
+    QMenu::item:disabled{color:rgba(227,232,246,0.35);}
+    QMenu::separator{height:1px; background:rgba(255,255,255,0.08); margin:5px 8px;}
+    QMenu::right-arrow{width:8px; height:8px;}
+"""
+
+
+class _FavTree(QTreeWidget):
+    """Árbol de favoritos. Soltar un favorito sobre una carpeta (o un favorito dentro de ella) lo mueve
+    ahí; soltarlo sobre un favorito suelto o en el hueco de abajo lo saca de la carpeta."""
+
+    moved = pyqtSignal(int, object)   # (id del favorito, id de carpeta o None)
+
+    def __init__(self):
+        super().__init__()
+        self.setHeaderHidden(True)
+        self.setRootIsDecorated(False)
+        self.setIndentation(14)
+        self.setAnimated(True)
+        self.setExpandsOnDoubleClick(False)   # el clic simple ya pliega/despliega
+        self.setDragEnabled(True)
+        self.setAcceptDrops(True)
+        self.setDropIndicatorShown(True)
+        self.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
+        self.setDefaultDropAction(Qt.DropAction.MoveAction)
+
+    def dropEvent(self, e):
+        src = self.currentItem()
+        data = src.data(0, _FAV_ROLE) if src else None
+        # El árbol se reconstruye desde la base de datos: nunca dejar que Qt mueva el item.
+        e.setDropAction(Qt.DropAction.IgnoreAction)
+        e.accept()
+        if not data or data[0] != "fav":
+            return
+        tgt = self.itemAt(e.position().toPoint())
+        tdata = tgt.data(0, _FAV_ROLE) if tgt else None
+        if not tdata:
+            folder = None
+        elif tdata[0] == "folder":
+            folder = tdata[1]
+        else:
+            folder = tdata[2]
+        if folder != data[2]:
+            self.moved.emit(data[1], folder)
+
 
 # ─── Ventana Principal ────────────────────────────────────────────────────────
 class Minichrome(QMainWindow):
@@ -490,21 +545,16 @@ class Minichrome(QMainWindow):
         self._notch.move((W - self._notch.width())//2, 1)
         self._notch.raise_()
 
-        # fav panel
+        # paneles flotantes de favoritos e historial
+        m = self.SIDE_MARGIN
+        ph = max(200, H - 2 * m)
         fw = self._fav_panel.width()
-        if self._fav_open:
-            self._fav_panel.setGeometry(W - fw, 0, fw, H)
-        else:
-            self._fav_panel.setGeometry(W, 0, fw, H)
+        self._fav_panel.setGeometry(W - fw - m if self._fav_open else W + 24, m, fw, ph)
         self._fav_panel.raise_()
-        
-        # hist panel
+
         hw = self._hist_panel.width()
         if hasattr(self, '_hist_open'):
-            if self._hist_open:
-                self._hist_panel.setGeometry(0, 0, hw, H)
-            else:
-                self._hist_panel.setGeometry(-hw, 0, hw, H)
+            self._hist_panel.setGeometry(m if self._hist_open else -hw - 24, m, hw, ph)
             self._hist_panel.raise_()
             
         # controles ventana top-right
@@ -631,239 +681,586 @@ class Minichrome(QMainWindow):
         self._notch.show()
         self._notch.raise_()
 
-    # ── Panel de Favoritos ────────────────────────────────────────────────────
-    def _build_fav_panel(self, parent):
-        self._fav_open = False
+    # ── Paneles laterales (Favoritos / Historial) ─────────────────────────────
+    SIDE_MARGIN = 12   # separación de la tarjeta respecto a los bordes de la ventana
+
+    def _build_side_card(self, parent, width, icon, title, placeholder, on_close, view=None, header_buttons=()):
+        """Tarjeta flotante con encabezado, buscador y lista; devuelve (frame, lista, contador, buscador).
+        `view` sustituye a la QListWidget por defecto (el filtrado corre entonces a cargo de quien llama);
+        `header_buttons` = [(texto, tooltip, slot), ...] junto al botón cerrar."""
         frame = QFrame(parent)
-        frame.setFixedWidth(280)
-        
-        self._fav_timer = QTimer(frame)
-        self._fav_timer.setSingleShot(True)
-        self._fav_timer.timeout.connect(lambda: self._toggle_fav_panel() if self._fav_open else None)
-        frame.enterEvent = lambda e: self._fav_timer.stop()
-        frame.leaveEvent = lambda e: self._fav_timer.start(2000)
-        
+        frame.setObjectName("side_card")
+        frame.setFixedWidth(width)
         frame.setStyleSheet("""
-            QFrame{background:rgba(12, 18, 35, 0.98);
-              border-left:1px solid rgba(81,162,255,0.25);}
-            QListWidget{background:transparent; border:none; outline:none; padding-right:0px;}
-            QListWidget::item{border-bottom:1px solid rgba(81,162,255,0.06);}
-            QListWidget::item:hover{background:rgba(81,162,255,0.08);}
-            QScrollBar:vertical{background:transparent; width:3px; margin:0;}
-            QScrollBar::handle:vertical{background:rgba(81,162,255,0.25); border-radius:1px; min-height:20px;}
-            QScrollBar::handle:vertical:hover{background:rgba(81,162,255,0.5);}
+            #side_card{background:qlineargradient(x1:0,y1:0,x2:0,y2:1,
+                stop:0 rgba(18,24,42,0.985), stop:1 rgba(12,16,30,0.985));
+              border:1px solid rgba(120,160,255,0.18); border-radius:16px;}
+            QLabel{background:transparent;}
+            QLineEdit{background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.08);
+              border-radius:10px; padding:8px 12px; color:#e8ecf8; font-size:12px;
+              selection-background-color:rgba(81,162,255,0.45);}
+            QLineEdit:focus{border-color:rgba(81,162,255,0.6); background:rgba(255,255,255,0.07);}
+            QListWidget{background:transparent; border:none; outline:none;}
+            QListWidget::item{border:none; border-radius:10px; margin:1px 0;}
+            QListWidget::item:hover{background:rgba(255,255,255,0.06);}
+            QListWidget::item:selected{background:rgba(81,162,255,0.14);}
+            QTreeWidget{background:transparent; border:none; outline:none;}
+            QTreeWidget::item{border:none; border-radius:10px; margin:1px 0;}
+            QTreeWidget::item:hover{background:rgba(255,255,255,0.06);}
+            QTreeWidget::item:selected{background:rgba(81,162,255,0.14);}
+            QTreeWidget::branch{background:transparent; border-image:none; image:none;}
+            QScrollBar:vertical{background:transparent; width:6px; margin:4px 0;}
+            QScrollBar::handle:vertical{background:rgba(255,255,255,0.12); border-radius:3px; min-height:30px;}
+            QScrollBar::handle:vertical:hover{background:rgba(255,255,255,0.25);}
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical{height:0;}
             QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical{background:transparent;}
         """)
-        _shadow(frame, blur=40, dy=0, alpha=150)
-        
+        _shadow(frame, blur=48, dy=12, alpha=170)
+
         v = QVBoxLayout(frame)
-        v.setContentsMargins(0, 0, 0, 10)
-        v.setSpacing(0)
-        
-        # Encabezado con gradiente azul
-        hdr = QWidget()
-        hdr.setFixedHeight(36)
-        hdr.setStyleSheet("background:qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 rgba(41,122,215,0.6), stop:1 rgba(81,162,255,0.3)); border:none;")
-        hdr_l = QHBoxLayout(hdr); hdr_l.setContentsMargins(15,0,15,0)
-        t = QLabel("\u2605  Tus Favoritos")
-        t.setStyleSheet("font-size:13px; font-weight:bold; color:rgba(255,255,255,0.9); background:transparent;")
-        hdr_l.addWidget(t)
-        v.addWidget(hdr)
-        
-        self._fav_list = QListWidget()
-        self._fav_list.setContentsMargins(10, 5, 5, 5)
-        v.addWidget(self._fav_list)
-        
+        v.setContentsMargins(16, 16, 12, 14)
+        v.setSpacing(12)
+
+        # Encabezado: icono, título + contador, cerrar
+        hdr = QHBoxLayout(); hdr.setSpacing(12)
+        ico = QLabel(icon)
+        ico.setFixedSize(38, 38)
+        ico.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        ico.setStyleSheet("background:qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 #51a2ff, stop:1 #6c5ce7);"
+                          "border-radius:11px; color:white; font-size:18px;")
+        texts = QVBoxLayout(); texts.setSpacing(1)
+        t = QLabel(title)
+        t.setStyleSheet("color:#ffffff; font-size:15px; font-weight:600;")
+        count = QLabel("")
+        count.setStyleSheet("color:rgba(200,210,240,0.55); font-size:11px;")
+        texts.addWidget(t); texts.addWidget(count)
+        close = QPushButton("✕")
+        close.setFixedSize(30, 30)
+        close.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        close.setToolTip("Cerrar")
+        close.setStyleSheet("QPushButton{background:transparent; border:none; border-radius:15px;"
+                            "color:rgba(255,255,255,0.55); font-size:13px;}"
+                            "QPushButton:hover{background:rgba(255,255,255,0.08); color:white;}")
+        close.clicked.connect(on_close)
+        hdr.addWidget(ico); hdr.addLayout(texts, 1)
+        for text, tip, slot in header_buttons:
+            hb = QPushButton(text)
+            hb.setFixedSize(30, 30)
+            hb.setToolTip(tip)
+            hb.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+            hb.setStyleSheet(close.styleSheet())
+            hb.clicked.connect(slot)
+            hdr.addWidget(hb, 0, Qt.AlignmentFlag.AlignTop)
+        hdr.addWidget(close, 0, Qt.AlignmentFlag.AlignTop)
+        v.addLayout(hdr)
+
+        search = QLineEdit()
+        search.setPlaceholderText(placeholder)
+        search.setClearButtonEnabled(True)
+        v.addWidget(search)
+
+        lst = view if view is not None else QListWidget()
+        lst.setVerticalScrollMode(QListWidget.ScrollMode.ScrollPerPixel)
+        lst.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        v.addWidget(lst, 1)
+        if view is not None:
+            return frame, lst, count, search
+
+        def apply_filter(text):
+            q = text.strip().lower()
+            for i in range(lst.count()):
+                it = lst.item(i)
+                key = it.data(Qt.ItemDataRole.UserRole + 1) or ""
+                it.setHidden(bool(q) and q not in key)
+        search.textChanged.connect(apply_filter)
+        return frame, lst, count, search
+
+    def _side_row(self, lst, title, url, width, badge="", badge_tip="", on_delete=None):
+        """Fila de la lista: inicial del sitio, título, dominio, etiqueta opcional y botón borrar."""
+        it = QListWidgetItem()
+        it.setData(Qt.ItemDataRole.UserRole, url)
+        it.setData(Qt.ItemDataRole.UserRole + 1, f"{title} {url}".lower())
+        it.setToolTip(url)
+        lst.addItem(it)
+        it.setSizeHint(QSize(width - 40, 50))
+        lst.setItemWidget(it, self._side_row_widget(title, url, width, badge, badge_tip, on_delete))
+
+    @staticmethod
+    def _side_icon_btn(text, tip, slot, danger=False):
+        b = QPushButton(text)
+        b.setFixedSize(26, 26)
+        b.setToolTip(tip)
+        b.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        hover = "background:rgba(255,95,87,0.16); color:#ff6b62;" if danger else "background:rgba(255,255,255,0.08); color:white;"
+        b.setStyleSheet("QPushButton{background:transparent; border:none; border-radius:13px;"
+                        "color:rgba(255,255,255,0.35); font-size:12px;}"
+                        f"QPushButton:hover{{{hover}}}")
+        b.clicked.connect(slot)
+        return b
+
+    def _side_row_widget(self, title, url, width, badge="", badge_tip="", on_delete=None, on_menu=None):
+        host = QUrl(url).host().removeprefix("www.") or url
+        w = QWidget()
+        w.setStyleSheet("background:transparent;")
+        h = QHBoxLayout(w)
+        h.setContentsMargins(8, 7, 6, 7)
+        h.setSpacing(10)
+
+        parts = host.split(".")
+        name = parts[-2] if len(parts) >= 2 else host   # es.wikipedia.org → wikipedia
+        letter = (name[:1] or "?").upper()
+        hue = sum(map(ord, name)) % 360
+        av = QLabel(letter)
+        av.setFixedSize(32, 32)
+        av.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        av.setStyleSheet(f"background:{QColor.fromHsl(hue, 150, 110).name()}; border-radius:9px;"
+                         "color:white; font-size:14px; font-weight:600;")
+        h.addWidget(av)
+
+        texts = QVBoxLayout(); texts.setSpacing(1)
+        text_w = width - 150 - (40 if badge else 0) - (30 if on_menu else 0)
+        tl = QLabel()
+        tl.setStyleSheet("color:#eef1fb; font-size:13px; font-weight:500;")
+        tl.setText(tl.fontMetrics().elidedText(title or host, Qt.TextElideMode.ElideRight, text_w))
+        dl = QLabel()
+        dl.setStyleSheet("color:rgba(190,200,230,0.5); font-size:11px;")
+        dl.setText(dl.fontMetrics().elidedText(host, Qt.TextElideMode.ElideRight, text_w))
+        texts.addWidget(tl); texts.addWidget(dl)
+        h.addLayout(texts, 1)
+
+        if badge:
+            b = QLabel(badge)
+            b.setToolTip(badge_tip)
+            b.setFixedHeight(20)
+            b.setStyleSheet("background:rgba(81,162,255,0.16); color:#8fc0ff; border-radius:10px;"
+                            "padding:0 8px; font-size:11px; font-weight:600;")
+            h.addWidget(b, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        if on_menu:
+            h.addWidget(self._side_icon_btn("⋯", "Más opciones", on_menu))
+        if on_delete:
+            h.addWidget(self._side_icon_btn("✕", "Eliminar", on_delete, danger=True))
+        return w
+
+    @staticmethod
+    def _side_empty(lst, text):
+        it = QListWidgetItem(text)
+        it.setFlags(Qt.ItemFlag.NoItemFlags)
+        it.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        it.setForeground(QColor(200, 210, 240, 110))
+        it.setSizeHint(QSize(0, 80))
+        lst.addItem(it)
+
+    @staticmethod
+    def _side_busy():
+        """Hay un diálogo o menú abierto (p. ej. renombrar carpeta): no autocerrar el panel."""
+        return bool(QApplication.activeModalWidget() or QApplication.activePopupWidget())
+
+    def _side_leave_timer(self, frame, timer, search):
+        """Cierra el panel 2 s después de salir con el ratón, salvo mientras se escribe en el buscador."""
+        frame.enterEvent = lambda e: timer.stop()
+        frame.leaveEvent = lambda e: None if (search.hasFocus() or self._side_busy()) else timer.start(2000)
+
+    # ── Panel de Favoritos (con carpetas) ─────────────────────────────────────
+    def _build_fav_panel(self, parent):
+        self._fav_open = False
+        self._fav_collapsed = set()   # carpetas plegadas (ids)
+        tree = _FavTree()
+        frame, self._fav_list, self._fav_count, self._fav_search = self._build_side_card(
+            parent, 360, "\u2605", "Favoritos", "Buscar en favoritos\u2026",
+            lambda: self._fav_open and self._toggle_fav_panel(), view=tree,
+            header_buttons=[("\uff0b", "Añadir la página actual", self._fav_add_current),
+                            ("\U0001F4C1", "Nueva carpeta", self._fav_new_folder)])
+        tree.itemClicked.connect(self._open_fav_item)
+        tree.moved.connect(self._fav_move)
+        tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        tree.customContextMenuRequested.connect(
+            lambda pos: (it := tree.itemAt(pos)) and self._fav_menu(it, tree.viewport().mapToGlobal(pos)))
+        self._fav_search.textChanged.connect(self._fav_filter)
+
+        self._fav_timer = QTimer(frame)
+        self._fav_timer.setSingleShot(True)
+        self._fav_timer.timeout.connect(lambda: self._toggle_fav_panel() if self._fav_open and not self._side_busy() else None)
+        self._side_leave_timer(frame, self._fav_timer, self._fav_search)
+
         self._fav_anim = QPropertyAnimation(frame, b"pos")
         self._fav_anim.setDuration(300)
         self._fav_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
-        
         return frame
 
     def _toggle_fav_panel(self):
         W = self.width()
         fw = self._fav_panel.width()
+        m = self.SIDE_MARGIN
         self._fav_anim.stop()
         self._fav_anim.setStartValue(self._fav_panel.pos())
         if not self._fav_open:
+            self._fav_search.clear()
             self._refresh_favs()
-            self._fav_anim.setEndValue(QPoint(W - fw, 0))
+            self._fav_panel.raise_()
+            self._fav_anim.setEndValue(QPoint(W - fw - m, m))
             self._fav_open = True
             self._fav_timer.start(2000)
             if hasattr(self, '_hist_open') and self._hist_open: self._toggle_hist_panel()
         else:
-            self._fav_anim.setEndValue(QPoint(W, 0))
+            self._fav_anim.setEndValue(QPoint(W + 24, m))
             self._fav_open = False
             self._fav_timer.stop()
         self._fav_anim.start()
 
     def _refresh_favs(self):
-        self._fav_list.clear()
-        for fid, title, url in get_favs():
-            it = QListWidgetItem()
-            self._fav_list.addItem(it)
-            w = QWidget()
-            h = QHBoxLayout(w)
-            h.setContentsMargins(5,5,5,5)
-            
-            l = QLabel(title[:25] + ("…" if len(title)>25 else ""))
-            l.setStyleSheet("color:#e0e0e0; font-size:12px; background:transparent;")
-            l.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-            l.mousePressEvent = lambda e, u=url: (self.new_tab(u), self._toggle_fav_panel())
-            
-            b = QPushButton("✕")
-            b.setFixedSize(20,20)
-            b.setStyleSheet("background:transparent; color:#ff5f57; border:none; font-size:12px;")
-            b.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-            b.clicked.connect(lambda _, f=fid: self._ask_del_fav(f))
-            
-            h.addWidget(l, 1)
-            h.addWidget(b)
-            it.setSizeHint(w.sizeHint())
-            self._fav_list.setItemWidget(it, w)
+        tree = self._fav_list
+        tree.clear()
+        width = self._fav_panel.width()
+        folders = get_fav_folders()
+        favs = get_favs_full()
+        by_folder = {}
+        for row in favs:
+            by_folder.setdefault(row[3], []).append(row)
+        folder_ids = {f for f, _ in folders}
+        n = len(favs)
+        self._fav_count.setText(f"{n} sitio{'s' if n != 1 else ''} · {len(folders)} carpeta{'s' if len(folders) != 1 else ''}")
+
+        def add_fav(parent_item, fid, title, url, folder_id):
+            it = QTreeWidgetItem(parent_item)
+            it.setData(0, _FAV_ROLE, ("fav", fid, folder_id, url, title))
+            it.setData(0, _FAV_KEY, f"{title} {url}".lower())
+            it.setToolTip(0, url)
+            it.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsDragEnabled)
+            indent = 14 if folder_id in folder_ids else 0
+            it.setSizeHint(0, QSize(width - 40 - indent, 50))
+            tree.setItemWidget(it, 0, self._side_row_widget(
+                title, url, width - indent, on_menu=lambda _=False, i=it: self._fav_menu(i),
+                on_delete=lambda _=False, f=fid: self._ask_del_fav(f)))
+
+        for folder_id, name in folders:
+            items = by_folder.get(folder_id, [])
+            fi = QTreeWidgetItem(tree)
+            fi.setData(0, _FAV_ROLE, ("folder", folder_id, name))
+            fi.setData(0, _FAV_KEY, name.lower())
+            fi.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsDropEnabled)
+            fi.setSizeHint(0, QSize(width - 40, 46))
+            tree.setItemWidget(fi, 0, self._fav_folder_widget(fi, name, len(items)))
+            for fid, title, url, _ in items:
+                add_fav(fi, fid, title, url, folder_id)
+            fi.setExpanded(folder_id not in self._fav_collapsed)
+
+        # Favoritos sin carpeta (o cuya carpeta ya no existe)
+        for folder_id, items in by_folder.items():
+            if folder_id in folder_ids:
+                continue
+            for fid, title, url, _ in items:
+                add_fav(tree, fid, title, url, None)
+
+        if not favs and not folders:
+            empty = QTreeWidgetItem(tree, ["Aún no tienes favoritos.\nPulsa \u2605 en la barra o \uff0b arriba para guardar una página."])
+            empty.setFlags(Qt.ItemFlag.NoItemFlags)
+            empty.setTextAlignment(0, Qt.AlignmentFlag.AlignCenter)
+            empty.setForeground(0, QColor(200, 210, 240, 110))
+            empty.setSizeHint(0, QSize(0, 80))
+        self._fav_filter(self._fav_search.text())
+
+    def _fav_folder_widget(self, item, name, count):
+        w = QWidget()
+        w.setStyleSheet("background:transparent;")
+        h = QHBoxLayout(w)
+        h.setContentsMargins(8, 6, 6, 6)
+        h.setSpacing(10)
+        ico = QLabel("\U0001F4C1")
+        ico.setFixedSize(32, 32)
+        ico.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        ico.setStyleSheet("background:rgba(253,203,110,0.16); border-radius:9px; font-size:15px;")
+        h.addWidget(ico)
+        texts = QVBoxLayout(); texts.setSpacing(0)
+        nl = QLabel()
+        nl.setStyleSheet("color:#f3f5fc; font-size:13px; font-weight:600;")
+        nl.setText(nl.fontMetrics().elidedText(name, Qt.TextElideMode.ElideRight, self._fav_panel.width() - 170))
+        cl = QLabel(f"{count} favorito{'s' if count != 1 else ''}" if count else "Vacía — arrastra favoritos aquí")
+        cl.setStyleSheet("color:rgba(190,200,230,0.5); font-size:11px;")
+        texts.addWidget(nl); texts.addWidget(cl)
+        h.addLayout(texts, 1)
+        chev = QLabel()
+        chev.setStyleSheet("color:rgba(255,255,255,0.45); font-size:11px;")
+        item.setData(0, _FAV_CHEVRON, chev)  # referencia para actualizar ▸/▾
+        self._fav_sync_chevron(item, chev)
+        h.addWidget(chev)
+        h.addWidget(self._side_icon_btn("⋯", "Opciones de la carpeta", lambda _=False, i=item: self._fav_menu(i)))
+        return w
+
+    @staticmethod
+    def _fav_sync_chevron(item, chev=None):
+        chev = chev or item.data(0, _FAV_CHEVRON)
+        if chev is not None:
+            chev.setText("\u25be" if item.isExpanded() else "\u25b8")
+
+    def _open_fav_item(self, it):
+        data = it.data(0, _FAV_ROLE)
+        if not data:
+            return
+        if data[0] == "folder":
+            it.setExpanded(not it.isExpanded())
+            (self._fav_collapsed.discard if it.isExpanded() else self._fav_collapsed.add)(data[1])
+            self._fav_sync_chevron(it)
+            return
+        self.new_tab(data[3])
+        self._toggle_fav_panel()
+
+    def _fav_filter(self, text):
+        q = text.strip().lower()
+        tree = self._fav_list
+        for i in range(tree.topLevelItemCount()):
+            top = tree.topLevelItem(i)
+            data = top.data(0, _FAV_ROLE)
+            if data and data[0] == "folder":
+                folder_hit = bool(q) and q in (top.data(0, _FAV_KEY) or "")
+                any_child = False
+                for j in range(top.childCount()):
+                    ch = top.child(j)
+                    hit = not q or folder_hit or q in (ch.data(0, _FAV_KEY) or "")
+                    ch.setHidden(not hit)
+                    any_child |= hit
+                top.setHidden(bool(q) and not (folder_hit or any_child))
+                if q and any_child:
+                    top.setExpanded(True)
+                elif not q:
+                    top.setExpanded(data[1] not in self._fav_collapsed)
+                self._fav_sync_chevron(top)
+            elif data:
+                top.setHidden(bool(q) and q not in (top.data(0, _FAV_KEY) or ""))
+
+    # ── Menú y acciones de favoritos ──────────────────────────────────────────
+    def _fav_menu(self, item, global_pos=None):
+        data = item.data(0, _FAV_ROLE)
+        if not data:
+            return
+        self._fav_timer.stop()
+        m = QMenu(self)
+        m.setStyleSheet(_MENU_QSS)
+        if data[0] == "folder":
+            _, folder_id, name = data
+            urls = [item.child(j).data(0, _FAV_ROLE)[3] for j in range(item.childCount())]
+            a = m.addAction(f"Abrir todos ({len(urls)})")
+            a.setEnabled(bool(urls))
+            a.triggered.connect(lambda: [self.new_tab(u) for u in urls] and self._toggle_fav_panel())
+            m.addSeparator()
+            m.addAction("Renombrar\u2026").triggered.connect(lambda: self._fav_rename_folder(folder_id, name))
+            m.addAction("Eliminar carpeta\u2026").triggered.connect(lambda: self._fav_del_folder(folder_id, name, len(urls)))
+        else:
+            _, fid, folder_id, url, title = data
+            m.addAction("Abrir").triggered.connect(lambda: (self.new_tab(url), self._toggle_fav_panel()))
+            m.addAction("Copiar enlace").triggered.connect(lambda: QApplication.clipboard().setText(url))
+            m.addAction("Editar\u2026").triggered.connect(lambda: self._fav_edit(fid, title, url))
+            sub = m.addMenu("Mover a")
+            sub.setStyleSheet(_MENU_QSS)
+            for f_id, f_name in get_fav_folders():
+                act = sub.addAction(f"\U0001F4C1  {f_name}")
+                act.setEnabled(f_id != folder_id)
+                act.triggered.connect(lambda _=False, t=f_id: self._fav_move(fid, t))
+            if folder_id is not None:
+                sub.addSeparator()
+                sub.addAction("Sin carpeta").triggered.connect(lambda: self._fav_move(fid, None))
+            sub.addSeparator()
+            sub.addAction("Nueva carpeta\u2026").triggered.connect(lambda: self._fav_new_folder(move_fav_id=fid))
+            m.addSeparator()
+            m.addAction("Eliminar").triggered.connect(lambda: self._ask_del_fav(fid))
+        m.exec(global_pos or QCursor.pos())
+
+    def _fav_move(self, fid, folder_id):
+        move_fav(fid, folder_id)
+        if folder_id is not None:
+            self._fav_collapsed.discard(folder_id)  # mostrar dónde quedó
+        self._refresh_favs()
+
+    def _fav_add_current(self):
+        v = self._cur()
+        url = v.url().toString() if v else ""
+        if not url or url.startswith("file://"):
+            Notif("Favoritos", "Abre una página web para guardarla.", self.centralWidget())
+            return
+        save_fav(v.title() or url, url)
+        self._refresh_favs()
+
+    def _fav_new_folder(self, move_fav_id=None):
+        vals = self._side_prompt("\U0001F4C1  Nueva carpeta", [("Nombre", "")], "Crear")
+        if not vals or not vals[0]:
+            return
+        folder_id = add_fav_folder(vals[0])
+        if move_fav_id is not None:
+            move_fav(move_fav_id, folder_id)
+        self._refresh_favs()
+
+    def _fav_rename_folder(self, folder_id, name):
+        vals = self._side_prompt("Renombrar carpeta", [("Nombre", name)], "Guardar")
+        if vals and vals[0]:
+            rename_fav_folder(folder_id, vals[0])
+            self._refresh_favs()
+
+    def _fav_del_folder(self, folder_id, name, count):
+        extra = f"Sus {count} favorito{'s' if count != 1 else ''} pasarán a \u201csin carpeta\u201d." if count else "La carpeta está vacía."
+        if self._side_confirm(f"¿Eliminar la carpeta \u201c{name}\u201d?", extra, "Eliminar"):
+            del_fav_folder(folder_id)
+            self._fav_collapsed.discard(folder_id)
+            self._refresh_favs()
+
+    def _fav_edit(self, fid, title, url):
+        vals = self._side_prompt("Editar favorito", [("Nombre", title), ("URL", url)], "Guardar")
+        if vals and vals[1]:
+            update_fav(fid, vals[0] or vals[1], vals[1])
+            self._refresh_favs()
 
     def _ask_del_fav(self, fid):
-        d = QDialog(self)
-        d.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
-        d.setStyleSheet("QDialog{background:#11111a; border:1px solid rgba(255,255,255,0.1); border-radius:12px;}")
-        v = QVBoxLayout(d)
-        v.setContentsMargins(20,20,20,20)
-        v.addWidget(QLabel("<b style='color:white; font-size:14px;'>¿Borrar favorito?</b>"))
-        v.addWidget(QLabel("<span style='color:#aaa; font-size:12px;'>Esta acción no se puede deshacer.</span>"))
-        h = QHBoxLayout()
-        bc = QPushButton("Cancelar"); bc.setStyleSheet(BTN_NAV); bc.clicked.connect(d.reject)
-        ba = QPushButton("Borrar"); ba.setStyleSheet(BTN_NAV + "color:#ff5f57;"); ba.clicked.connect(d.accept)
-        h.addWidget(bc); h.addWidget(ba)
-        v.addLayout(h)
-        if d.exec() == QDialog.DialogCode.Accepted:
+        if self._side_confirm("¿Borrar favorito?", "Esta acción no se puede deshacer.", "Borrar"):
             del_fav(fid)
             self._refresh_favs()
+
+    # ── Diálogos pequeños con el estilo de los paneles ────────────────────────
+    def _side_dialog(self, title):
+        d = QDialog(self)
+        d.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
+        d.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        outer = QVBoxLayout(d); outer.setContentsMargins(0, 0, 0, 0)
+        card = QFrame(); card.setObjectName("side_dialog")
+        card.setStyleSheet("""
+            #side_dialog{background:#141a2c; border:1px solid rgba(120,160,255,0.22); border-radius:14px;}
+            QLabel{background:transparent; color:#e8ecf8;}
+            QLineEdit{background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1);
+              border-radius:9px; padding:8px 10px; color:#e8ecf8; font-size:13px;}
+            QLineEdit:focus{border-color:rgba(81,162,255,0.6);}
+            QPushButton{background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.1);
+              border-radius:9px; color:#dfe5f5; padding:7px 16px; font-size:12px;}
+            QPushButton:hover{background:rgba(255,255,255,0.12);}
+            QPushButton#primary{background:#3f7fe0; border-color:#3f7fe0; color:white;}
+            QPushButton#primary:hover{background:#4f8ff0;}
+            QPushButton#danger{background:rgba(255,95,87,0.18); border-color:rgba(255,95,87,0.4); color:#ff8a82;}
+            QPushButton#danger:hover{background:rgba(255,95,87,0.3); color:white;}
+        """)
+        outer.addWidget(card)
+        v = QVBoxLayout(card); v.setContentsMargins(20, 18, 20, 18); v.setSpacing(10)
+        t = QLabel(title)
+        t.setStyleSheet("font-size:15px; font-weight:600; color:white;")
+        v.addWidget(t)
+        d.setMinimumWidth(340)
+        return d, v
+
+    def _side_dialog_buttons(self, d, v, ok_text, ok_name="primary"):
+        h = QHBoxLayout(); h.addStretch(1)
+        bc = QPushButton("Cancelar"); bc.clicked.connect(d.reject)
+        ok = QPushButton(ok_text); ok.setObjectName(ok_name); ok.setDefault(True); ok.clicked.connect(d.accept)
+        for b in (bc, ok):
+            b.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        h.addWidget(bc); h.addWidget(ok)
+        v.addSpacing(4); v.addLayout(h)
+
+    def _side_prompt(self, title, fields, ok_text):
+        """Pide uno o más textos; devuelve la lista (sin espacios sobrantes) o None si se cancela."""
+        d, v = self._side_dialog(title)
+        edits = []
+        for label, value in fields:
+            lbl = QLabel(label)
+            lbl.setStyleSheet("color:rgba(200,210,240,0.65); font-size:11px;")
+            e = QLineEdit(value)
+            v.addWidget(lbl); v.addWidget(e)
+            edits.append(e)
+        self._side_dialog_buttons(d, v, ok_text)
+        edits[0].setFocus(); edits[0].selectAll()
+        if d.exec() != QDialog.DialogCode.Accepted:
+            return None
+        return [e.text().strip() for e in edits]
+
+    def _side_confirm(self, title, text, ok_text):
+        d, v = self._side_dialog(title)
+        body = QLabel(text); body.setWordWrap(True)
+        body.setStyleSheet("color:rgba(200,210,240,0.7); font-size:12px;")
+        v.addWidget(body)
+        self._side_dialog_buttons(d, v, ok_text, "danger")
+        return d.exec() == QDialog.DialogCode.Accepted
 
     # ── Panel de Historial y Datos ────────────────────────────────────────────
     def _build_hist_panel(self, parent):
         self._hist_open = False
-        frame = QFrame(parent)
-        frame.setFixedWidth(290)
-        
+        frame, self._hist_list, self._hist_count, self._hist_search = self._build_side_card(
+            parent, 380, "\u25f7", "Historial", "Buscar en el historial\u2026",
+            lambda: self._hist_open and self._toggle_hist_panel())
+        self._hist_list.itemClicked.connect(self._open_hist_item)
+
         self._hist_timer = QTimer(frame)
         self._hist_timer.setSingleShot(True)
         self._hist_timer.timeout.connect(lambda: self._toggle_hist_panel() if self._hist_open else None)
-        frame.enterEvent = lambda e: self._hist_timer.stop()
-        frame.leaveEvent = lambda e: self._hist_timer.start(2000)
-        
-        frame.setStyleSheet("""
-            QFrame{background:rgba(12, 18, 35, 0.98); border-right:1px solid rgba(81,162,255,0.25);}
-            QListWidget{background:transparent; border:none; outline:none; padding-left:0px;}
-            QListWidget::item{border-bottom:1px solid rgba(81,162,255,0.06);}
-            QListWidget::item:hover{background:rgba(81,162,255,0.08);}
-            QScrollBar:vertical{background:transparent; width:3px; margin:0;}
-            QScrollBar::handle:vertical{background:rgba(81,162,255,0.25); border-radius:1px; min-height:20px;}
-            QScrollBar::handle:vertical:hover{background:rgba(81,162,255,0.5);}
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical{height:0;}
-            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical{background:transparent;}
-        """)
-        _shadow(frame, blur=40, dy=0, alpha=150)
-        
-        v = QVBoxLayout(frame)
-        v.setContentsMargins(0, 0, 0, 10)
-        v.setSpacing(0)
-        
-        # Encabezado con gradiente azul
-        hdr = QWidget()
-        hdr.setFixedHeight(36)
-        hdr.setStyleSheet("background:qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 rgba(81,162,255,0.3), stop:1 rgba(41,122,215,0.6)); border:none;")
-        hdr_l = QHBoxLayout(hdr); hdr_l.setContentsMargins(15,0,15,0)
-        t = QLabel("\u25f7  Historial")
-        t.setStyleSheet("font-size:13px; font-weight:bold; color:rgba(255,255,255,0.9); background:transparent;")
-        hdr_l.addWidget(t)
-        v.addWidget(hdr)
-        
-        PANEL_BTN = """QPushButton{font-size:11px; background:rgba(41,122,215,0.2);
-            border:1px solid rgba(81,162,255,0.2); border-radius:4px;
-            color:rgba(255,255,255,0.7); padding:3px 8px;}
-            QPushButton:hover{background:rgba(41,122,215,0.4); color:white;
-            border-color:rgba(81,162,255,0.4);}"""
-        
+        self._side_leave_timer(frame, self._hist_timer, self._hist_search)
+
+        PANEL_BTN = """QPushButton{font-size:12px; background:rgba(255,255,255,0.05);
+            border:1px solid rgba(255,255,255,0.08); border-radius:9px;
+            color:rgba(230,236,255,0.8); padding:7px 10px;}
+            QPushButton:hover{background:rgba(81,162,255,0.18); color:white;
+            border-color:rgba(81,162,255,0.45);}"""
+
         h_btns = QHBoxLayout()
-        h_btns.setContentsMargins(10, 4, 10, 4)
-        btn_clr_hist = QPushButton("Limpiar Historial")
+        h_btns.setSpacing(8)
+        btn_clr_hist = QPushButton("\U0001F5D1  Limpiar historial")
         btn_clr_hist.setToolTip("Eliminar todo el historial de navegaci\u00f3n")
         btn_clr_hist.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         btn_clr_hist.setStyleSheet(PANEL_BTN)
         btn_clr_hist.clicked.connect(self._clear_hist)
-        
-        btn_clr_cache = QPushButton("Limpiar Cach\u00e9")
+
+        btn_clr_cache = QPushButton("\U0001F9F9  Limpiar cach\u00e9")
         btn_clr_cache.setToolTip("Vaciar cach\u00e9, cookies y datos de formularios")
         btn_clr_cache.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         btn_clr_cache.setStyleSheet(PANEL_BTN)
         btn_clr_cache.clicked.connect(self._clear_cache)
-        
-        h_btns.addWidget(btn_clr_hist)
-        h_btns.addWidget(btn_clr_cache)
-        v.addLayout(h_btns)
-        
-        self._hist_list = QListWidget()
-        self._hist_list.setContentsMargins(5, 5, 10, 5)
-        v.addWidget(self._hist_list)
-        
+
+        for b in (btn_clr_hist, btn_clr_cache):
+            b.setFixedHeight(36)
+        h_btns.addWidget(btn_clr_hist, 1)
+        h_btns.addWidget(btn_clr_cache, 1)
+        frame.layout().addLayout(h_btns)
+
         self._hist_anim = QPropertyAnimation(frame, b"pos")
         self._hist_anim.setDuration(300)
         self._hist_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
-        
         return frame
 
     def _toggle_hist_panel(self):
         hw = self._hist_panel.width()
+        m = self.SIDE_MARGIN
         self._hist_anim.stop()
         self._hist_anim.setStartValue(self._hist_panel.pos())
         if not self._hist_open:
             self._refresh_hist()
-            self._hist_anim.setEndValue(QPoint(0, 0))
+            self._hist_search.clear()
+            self._hist_panel.raise_()
+            self._hist_anim.setEndValue(QPoint(m, m))
             self._hist_open = True
             self._hist_timer.start(2000)
             if self._fav_open: self._toggle_fav_panel() # cerrar favoritos si estaba abierto
         else:
-            self._hist_anim.setEndValue(QPoint(-hw, 0))
+            self._hist_anim.setEndValue(QPoint(-hw - 24, m))
             self._hist_open = False
             self._hist_timer.stop()
         self._hist_anim.start()
 
+    def _open_hist_item(self, it):
+        url = it.data(Qt.ItemDataRole.UserRole)
+        if not url:
+            return
+        if (it.data(Qt.ItemDataRole.UserRole + 2) or 1) > 1:
+            self._show_hist_details(url)
+        else:
+            self.new_tab(url)
+            self._toggle_hist_panel()
+
     def _refresh_hist(self):
         self._hist_list.clear()
-        for hid, title, url, visits in get_history():
-            it = QListWidgetItem()
-            self._hist_list.addItem(it)
-            w = QWidget()
-            h = QHBoxLayout(w)
-            h.setContentsMargins(5,5,5,5)
-            h.setSpacing(4)
-            
-            d_title = title if title else url
-            display_text = d_title[:28] + ("…" if len(d_title)>28 else "")
-            if visits > 1:
-                display_text += f" <span style='color:rgba(81,162,255,0.5); font-size:9px;'>({visits})</span>"
-            
-            l = QLabel(display_text)
-            l.setStyleSheet("color:#e0e0e0; font-size:12px; background:transparent;")
-            l.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-            l.setToolTip(f"{url}\nClick para detalles" if visits > 1 else url)
-            
-            if visits > 1:
-                l.mousePressEvent = lambda e, u=url: self._show_hist_details(u)
-            else:
-                l.mousePressEvent = lambda e, u=url: (self.new_tab(u), self._toggle_hist_panel())
-            
-            b = QPushButton("✕")
-            b.setFixedSize(20,20)
-            b.setStyleSheet("background:transparent; color:#ff5f57; border:none; font-size:12px;")
-            b.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-            b.clicked.connect(lambda _, hi=hid: self._del_hist_item(hi))
-            
-            h.addWidget(l, 1)
-            h.addWidget(b)
-            it.setSizeHint(w.sizeHint())
-            self._hist_list.setItemWidget(it, w)
+        rows = get_history()
+        n = len(rows)
+        self._hist_count.setText(f"{n} sitio{'s' if n != 1 else ''} reciente{'s' if n != 1 else ''}")
+        if not rows:
+            self._side_empty(self._hist_list, "El historial está vacío.")
+        for hid, title, url, visits in rows:
+            self._side_row(self._hist_list, title or url, url, self._hist_panel.width(),
+                           badge=f"{visits}\u00d7" if visits > 1 else "",
+                           badge_tip=f"{visits} visitas \u2014 clic para ver el detalle",
+                           on_delete=lambda _=False, hi=hid: self._del_hist_item(hi))
+            self._hist_list.item(self._hist_list.count() - 1).setData(Qt.ItemDataRole.UserRole + 2, visits)
 
     def _show_hist_details(self, url):
         d = QDialog(self)

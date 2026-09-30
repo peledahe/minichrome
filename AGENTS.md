@@ -15,7 +15,7 @@
 ## Architecture Map
 - Python modules (layered; lower layers never import upper ones):
   - `config.py`: paths (`BASE`, `DB`, `CACHE`, `HOME`, `UI_DIR`), `is_internal_url`, `settings.json`, quick links.
-  - `db.py`: DB schema/migrations in `_db()`, `get_config`/`set_config`, favorites/history helpers.
+  - `db.py`: DB schema/migrations in `_db()`, `get_config`/`set_config`, favorites/history helpers. Favorites can live in one-level folders (`fav_folders`, `fav.folder_id` NULL = no folder); the favorites panel in `window.py` (`_FavTree`, `_refresh_favs`, `_fav_*`) manages them.
   - `secure_store.py`: password encryption (`encrypt`/`decrypt`, `enc:v1:` prefix). Key lives in the system keyring (service `minichrome`); plaintext rows are still readable and get migrated at startup.
   - `widgets.py`: shared Qt styles, `_shadow`, `Notif`.
   - `bridges.py`: QWebChannel bridges exposed to JS:
@@ -25,6 +25,7 @@
   - `window.py`: main window `Minichrome` (tabs, bar, panels, shortcuts, "⋮" menu).
   - `screen_capture.py`: desktop area selection overlay (F9), Qt port of the ScreenShot app overlay.
   - `google_sync.py`: Google Calendar sync (desktop OAuth + PKCE, stdlib HTTP). OAuth client JSON and refresh token live in the system keyring; Google events are cached in `google_events`; dated activities are mirrored (all-day events tagged with `extendedProperties.private.mcKey`) into a dedicated "Minichrome" calendar. Exposed to `ui/newtab.html` (calendar modal) via `py.google_*` slots and the `google_changed` signal.
+  - `native_video.py` + `native_video.qml`: native QtMultimedia player for local videos in `ui/videoplayer.html` that QtWebEngine can't decode (the PyPI build has no proprietary codecs: H.264/H.265/AAC); WebM VP9/AV1 stay in the page's `<video>` (Qt's FFmpeg only decodes AV1 in hardware). `NativeVideoPlayer` is a transparent `QQuickWidget` (`WA_AlwaysStackOnTop`) child of the `WebView`; the QML cuts the holes with `MultiEffect` because QWidget masks are ignored when a QQuickWidget is composited on screen (they still route clicks to the page), overlaid on `#main-player`; the page sends its rect, object-fit and the "holes" where page elements sit on top via `py.native_video_layout`, and receives `video_event` (time/playing/paused/ended/activity/action). `playback_mode()` probes codecs with `ffprobe`; thumbnails for undecodable videos come from `ffmpeg` (`py.request_video_thumbnail` + `video_thumbnail_ready`). Cinema mode falls back to `py.set_window_fullscreen` when the Fullscreen API has no user gesture.
   - `main.py`: entrypoint only (env flags, `QApplication`, password migration, window).
 - `browser_features.py`
   - Standard browser features wired from `browser.py`/`window.py`: downloads panel (Ctrl+J), find bar (Ctrl+F), DevTools (F12), print/PDF (Ctrl+P), per-site permission prompts, certificate-error dialog, crashed-tab overlay.

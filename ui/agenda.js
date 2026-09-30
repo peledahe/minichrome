@@ -374,6 +374,16 @@ function renderEditReminderTagHelper() {
     });
 }
 
+const CFG_TOGGLE_KEYS = {
+    'cfg-video-enabled': 'videoEnabled',
+    'cfg-images-enabled': 'imagesEnabled',
+    'cfg-shopping-enabled': 'shoppingEnabled',
+    'cfg-income-enabled': 'incomeEnabled',
+    'cfg-kanban-enabled': 'kanbanEnabled',
+    'cfg-notes-enabled': 'notesEnabled',
+    'cfg-arcade-enabled': 'arcadeEnabled'
+};
+
 function bindConfigEvents() {
     const cfgToggleIds = [
         'cfg-video-enabled',
@@ -391,6 +401,9 @@ function bindConfigEvents() {
         el.addEventListener('change', () => {
             syncCfgFromInputs();
             applyModuleFilters();
+            // Se guarda al instante: la página de inicio muestra u oculta el acceso sin pulsar "Guardar".
+            const key = CFG_TOGGLE_KEYS[id];
+            if (key) py.set_config(key, state.cfg[key] ? '1' : '0');
         });
     });
 

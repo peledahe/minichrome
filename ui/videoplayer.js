@@ -253,6 +253,205 @@ function setVideoSource(url) {
     }
 }
 
+// --- Reproductor nativo (QtMultimedia) ---
+// El QtWebEngine de PyPI no trae códecs propietarios (H.264/H.265/AAC): esos videos
+// se reproducen con un widget nativo de Qt superpuesto sobre #main-player.
+const nativeVideo = { active: false, url: '', time: 0, savedTime: 0, paused: true, geomKey: '', timer: null };
+const nativeThumbWaiters = new Map();
+
+function isLocalFileUrl(url) {
+    return typeof url === 'string' && url.startsWith('file:');
+}
+
+async function needsNativePlayback(url) {
+    if (!isLocalFileUrl(url)) return false;
+    try {
+        return (await py.video_playback_mode(url)) === 'native';
+    } catch (_e) {
+        return false;
+    }
+}
+
+function startNativePlayback(video, startTime) {
+    mainPlayer.pause();
+    mainPlayer.removeAttribute('src');
+    mainPlayer.load();
+    nativeVideo.active = true;
+    nativeVideo.url = video.url;
+    nativeVideo.time = startTime;
+    nativeVideo.savedTime = startTime;
+    nativeVideo.paused = false;
+    nativeVideo.geomKey = '';
+    mainPlayer.removeAttribute('controls');
+    syncNativeGeometry();
+    if (!nativeVideo.timer) nativeVideo.timer = setInterval(syncNativeGeometry, 200);
+    py.native_video_play(video.url, startTime, !!settings.startMuted);
+}
+
+function saveNativeProgress() {
+    if (!nativeVideo.active || !(nativeVideo.time > 0)) return;
+    nativeVideo.savedTime = nativeVideo.time;
+    playbackHistory.set(nativeVideo.url, nativeVideo.time);
+    py.save_playback(nativeVideo.url, nativeVideo.time.toString());
+}
+
+function stopNativePlayback() {
+    if (!nativeVideo.active) return;
+    nativeVideo.active = false;
+    clearInterval(nativeVideo.timer);
+    nativeVideo.timer = null;
+    mainPlayer.setAttribute('controls', '');
+    document.body.classList.remove('native-hover');
+    py.native_video_command('stop');
+}
+
+// Elemento "flotante" (fixed/absolute) que contiene a `el`: es lo que se recorta del video.
+function overlayRootOf(el) {
+    let node = el;
+    while (node && node !== document.body) {
+        const pos = getComputedStyle(node).position;
+        if (pos === 'fixed' || pos === 'absolute') return node;
+        node = node.parentElement;
+    }
+    return el;
+}
+
+function isEffectivelyVisible(el) {
+    for (let node = el; node && node !== document.body; node = node.parentElement) {
+        const cs = getComputedStyle(node);
+        if (cs.visibility === 'hidden' || parseFloat(cs.opacity) < 0.05) return false;
+    }
+    return true;
+}
+
+// Posición del widget nativo = rect de #main-player. Lo que la página muestre encima
+// (cabecera del modo cine, menús, avisos) se recorta del widget; un modal lo oculta.
+function syncNativeGeometry() {
+    if (!nativeVideo.active) return;
+    const r = mainPlayer.getBoundingClientRect();
+    let visible = r.width > 0 && r.height > 0
+        && document.visibilityState === 'visible'
+        && !document.body.classList.contains('privacy-active');
+    const holes = [];
+    if (visible) {
+        const seen = new Set();
+        // Rejilla cada 32 px más los bordes (una notificación puede tapar solo el filo inferior).
+        const samples = (from, to) => {
+            const out = [];
+            for (let v = from + 3; v < to - 3; v += 32) out.push(v);
+            out.push(to - 3);
+            return out;
+        };
+        const xs = samples(r.left, r.right);
+        for (const y of samples(r.top, r.bottom)) {
+            if (!visible) break;
+            for (const x of xs) {
+                const el = document.elementFromPoint(x, y);
+                if (!el || el === mainPlayer || el.closest('.video-wrapper')) continue;
+                const root = overlayRootOf(el);
+                if (seen.has(root)) continue;
+                seen.add(root);
+                if (!isEffectivelyVisible(root)) continue;
+                const b = root.getBoundingClientRect();
+                const ix = Math.max(b.left, r.left), iy = Math.max(b.top, r.top);
+                const iw = Math.min(b.right, r.right) - ix, ih = Math.min(b.bottom, r.bottom) - iy;
+                if (iw <= 0 || ih <= 0) continue;
+                if (iw * ih > r.width * r.height * 0.5) { visible = false; break; } // modal
+                holes.push([ix - 1, iy - 1, iw + 2, ih + 2].map(Math.round)); // +1 px contra el redondeo
+            }
+        }
+    }
+    const video = currentVideos[currentIndex];
+    const layout = {
+        x: r.left, y: r.top, w: r.width, h: r.height, visible, holes,
+        cover: getComputedStyle(mainPlayer).objectFit === 'cover',
+        cinema: document.body.classList.contains('ui-collapsed'),
+        title: video ? video.name || '' : '',
+    };
+    const key = JSON.stringify(layout);
+    if (key === nativeVideo.geomKey) return;
+    nativeVideo.geomKey = key;
+    py.native_video_layout(key);
+}
+
+window.addEventListener('resize', syncNativeGeometry);
+
+// Durante transiciones CSS (la lista que se desliza, la cabecera del modo cine) el recorte
+// se recalcula en cada cuadro; si no, el panel queda detrás del video mientras se anima.
+let nativeAnimUntil = 0;
+function nativeAnimLoop() {
+    syncNativeGeometry();
+    if (nativeVideo.active && performance.now() < nativeAnimUntil) requestAnimationFrame(nativeAnimLoop);
+    else nativeAnimUntil = 0;
+}
+function followNativeLayout(ms) {
+    if (!nativeVideo.active) return;
+    const running = nativeAnimUntil > 0;
+    nativeAnimUntil = Math.max(nativeAnimUntil, performance.now() + ms);
+    if (!running) requestAnimationFrame(nativeAnimLoop);
+}
+document.addEventListener('transitionrun', () => followNativeLayout(700), true);
+document.addEventListener('animationstart', () => followNativeLayout(700), true);
+document.addEventListener('click', () => followNativeLayout(100), true);
+
+py.video_event.connect((raw) => {
+    let ev;
+    try { ev = JSON.parse(raw); } catch (_e) { return; }
+    if (!nativeVideo.active) return;
+    switch (ev.type) {
+        case 'time':
+            nativeVideo.time = ev.time;
+            if (!nativeVideo.paused && Math.abs(ev.time - (nativeVideo.savedTime || 0)) >= 15) saveNativeProgress();
+            break;
+        case 'playing':
+        case 'paused': {
+            nativeVideo.paused = ev.type === 'paused';
+            nativeVideo.time = ev.time;
+            if (nativeVideo.paused) saveNativeProgress();
+            const loader = document.getElementById('player-loader');
+            if (loader) loader.style.display = 'none';
+            break;
+        }
+        case 'ended':
+            nativeVideo.paused = true;
+            playbackHistory.delete(nativeVideo.url);
+            py.save_playback(nativeVideo.url, '0');
+            if (typeof mainPlayer.onended === 'function') mainPlayer.onended();
+            break;
+        case 'error':
+            showNotification(`Error al reproducir el video: ${ev.message}`, 'error');
+            break;
+        case 'activity':
+            // Equivale al :hover de la página (el ratón está sobre el widget nativo).
+            document.body.classList.toggle('native-hover', !!ev.active);
+            break;
+        case 'action':
+            if (ev.action === 'prev') prevBtn.click();
+            else if (ev.action === 'next') nextBtn.click();
+            else if (ev.action === 'tag') document.getElementById('vqa-tag')?.click();
+            else if (ev.action === 'delete') document.getElementById('vqa-delete')?.click();
+            else if (ev.action === 'cinema') setCinemaMode(!document.body.classList.contains('ui-collapsed'));
+            else if (ev.action === 'escape') window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+            break;
+    }
+});
+
+py.video_thumbnail_ready.connect((url, dataUrl) => {
+    const resolve = nativeThumbWaiters.get(url);
+    if (!resolve) return;
+    nativeThumbWaiters.delete(url);
+    resolve(dataUrl);
+});
+
+// Miniatura generada con ffmpeg para videos que el <video> no puede decodificar.
+function requestNativeThumbnail(url) {
+    if (!isLocalFileUrl(url)) return Promise.resolve('');
+    return new Promise((resolve) => {
+        nativeThumbWaiters.set(url, resolve);
+        py.request_video_thumbnail(url);
+    });
+}
+
 function setStartupVideo() {
     setVideoSource(STARTUP_VIDEO_URL);
     mainPlayer.preload = 'auto';
@@ -404,6 +603,7 @@ saveSettingsBtn.addEventListener('click', async () => {
 });
 
 function resetPlayer() {
+    stopNativePlayback();
     mainPlayer.pause();
     setStartupVideo();
     currentIndex = -1;
@@ -808,6 +1008,7 @@ async function moveVideo(filename, fromFolder, toFolder) {
                     } else {
                         mainPlayer.pause();
                         mainPlayer.src = '';
+                        stopNativePlayback();
                         externalPlayer.src = '';
                         externalPlayer.style.display = 'none';
                         currentVideoTitle.textContent = 'Ningún video seleccionado';
@@ -1124,6 +1325,17 @@ async function captureThumbnail(url, index) {
     const thumbDiv = document.getElementById(`thumb-${index}`);
     if (!thumbDiv) return Promise.resolve();
 
+    // Archivos locales: ffmpeg saca un cuadro en otro proceso (rápido y sirve para cualquier códec).
+    if (isLocalFileUrl(url)) {
+        const dataUrl = await requestNativeThumbnail(url);
+        if (dataUrl) {
+            thumbnailCache.set(url, dataUrl);
+            DbManager.put('thumbnails', { url, dataUrl });
+            updateThumbUI(index, dataUrl);
+            return;
+        }
+    }
+
     return new Promise((resolve) => {
         try {
             const video = document.createElement('video');
@@ -1150,7 +1362,14 @@ async function captureThumbnail(url, index) {
 
             video.onerror = () => {
                 video.remove();
-                resolve();
+                requestNativeThumbnail(url).then((dataUrl) => {
+                    if (dataUrl) {
+                        thumbnailCache.set(url, dataUrl);
+                        DbManager.put('thumbnails', { url, dataUrl });
+                        updateThumbUI(index, dataUrl);
+                    }
+                    resolve();
+                });
             };
             video.load();
         } catch (e) {
@@ -1172,7 +1391,7 @@ function startThumbnailQueue(videos) {
     // Iniciamos la cadena de generación pausada
     activeQueueTimeout = setTimeout(() => {
         processNextInQueue(videos);
-    }, 5000); // 5 segundos iniciales de calma absoluta
+    }, 1500); // calma inicial para que el video arranque primero
 }
 
 async function processNextInQueue(videos) {
@@ -1189,13 +1408,14 @@ async function processNextInQueue(videos) {
     if (queueIndex >= videos.length) return;
 
     // Si llegamos aquí, es que el videos[queueIndex] NO está en caché y necesita captura real
-    await captureThumbnail(videos[queueIndex].url, queueIndex);
+    const capturedUrl = videos[queueIndex].url;
+    await captureThumbnail(capturedUrl, queueIndex);
     queueIndex++;
 
-    // DESCANSO: Solo esperamos si tuvimos que hacer una captura pesada
+    // DESCANSO: Solo esperamos si tuvimos que hacer una captura pesada (ffmpeg es ligera)
     activeQueueTimeout = setTimeout(() => {
         processNextInQueue(videos);
-    }, 3000);
+    }, isLocalFileUrl(capturedUrl) ? 150 : 3000);
 }
 
 function updateThumbUI(index, dataUrl) {
@@ -1335,6 +1555,7 @@ async function deleteVideo() {
                     } else {
                         mainPlayer.pause();
                         mainPlayer.src = '';
+                        stopNativePlayback();
                         externalPlayer.src = '';
                         externalPlayer.style.display = 'none';
                         currentVideoTitle.textContent = 'Ningún video seleccionado';
@@ -1373,6 +1594,7 @@ async function deleteVideo() {
                     } else {
                         mainPlayer.pause();
                         mainPlayer.src = '';
+                        stopNativePlayback();
                         externalPlayer.src = '';
                         externalPlayer.style.display = 'none';
                         currentVideoTitle.textContent = 'Ningún video seleccionado';
@@ -1394,6 +1616,7 @@ async function deleteVideo() {
                         } else {
                             mainPlayer.pause();
                             mainPlayer.src = '';
+                            stopNativePlayback();
                             externalPlayer.src = '';
                             externalPlayer.style.display = 'none';
                             currentVideoTitle.textContent = 'Ningún video seleccionado';
@@ -1428,6 +1651,7 @@ async function deleteFolderAsync() {
                 renderVideos([]);
                 mainPlayer.pause();
                 mainPlayer.src = '';
+                stopNativePlayback();
                 currentVideoTitle.textContent = 'Ningún video seleccionado';
             }
 
@@ -1541,7 +1765,12 @@ function playVideo(index) {
 
     setTimeout(async () => {
         // Guardar progreso del video anterior si era nativo
-        if (previousVideo && !mainPlayer.paused && !previousVideo.type) {
+        if (previousVideo && nativeVideo.active && nativeVideo.url === previousVideo.url) {
+            if (!nativeVideo.paused && nativeVideo.time > 0) {
+                playbackHistory.set(previousVideo.url, nativeVideo.time);
+                py.save_playback(previousVideo.url, nativeVideo.time.toString());
+            }
+        } else if (previousVideo && !mainPlayer.paused && !previousVideo.type) {
             const time = mainPlayer.currentTime;
             playbackHistory.set(previousVideo.url, time);
             py.save_playback(previousVideo.url, time.toString());
@@ -1564,7 +1793,7 @@ function playVideo(index) {
                 }
                 mainPlayer.classList.remove('player-fading');
             }).catch(e => {
-                if (e.name !== 'NotAllowedError') {
+                if (e.name !== 'NotAllowedError' && !(e.name === 'NotSupportedError' && isLocalFileUrl(video.url))) {
                     console.error('Error playing video:', e);
                     showNotification('Error al reproducir el video', 'error');
                     mainPlayer.pause();
@@ -1575,6 +1804,7 @@ function playVideo(index) {
 
         // --- LÓGICA DE REPRODUCTORES ---
         if (video.type === 'youtube' || video.type === 'embed') {
+            stopNativePlayback();
             mainPlayer.style.display = 'none';
             mainPlayer.pause();
             externalPlayer.src = video.url;
@@ -1591,28 +1821,39 @@ function playVideo(index) {
             currentVideoTitle.textContent = formatVideoTitleWithSize(video);
             updatePlayerTagChips(video);
 
-            setVideoSource(video.url);
-
-            // Subtítulos
-            const tracks = mainPlayer.querySelectorAll('track');
-            tracks.forEach(t => t.remove());
-            if (video.subtitle) {
-                const track = document.createElement('track');
-                track.kind = 'subtitles';
-                track.label = 'Español';
-                track.srclang = 'es';
-                track.src = video.subtitle;
-                track.default = true;
-                mainPlayer.appendChild(track);
-            }
-
-            stopThumbnailQueue();
-
-            // Si usamos HLS, esperamos al evento; si no, directo
-            if (hlsInstance) {
-                hlsInstance.once(Hls.Events.MANIFEST_PARSED, () => startPlayback());
+            // Solo los códecs que QtWebEngine no trae (H.264/H.265/AAC...) van al reproductor nativo;
+            // el resto (WebM VP9/AV1) se queda en el <video> de la página.
+            if (await needsNativePlayback(video.url)) {
+                if (currentVideos[currentIndex] !== video) return; // se eligió otro mientras tanto
+                const savedTime = playbackHistory.get(video.url) || 0;
+                startNativePlayback(video, savedTime > 0 ? savedTime : 5);
+                isFirstPlayStarted = true;
+                startThumbnailQueue(currentVideos);
             } else {
-                startPlayback();
+                stopNativePlayback();
+                setVideoSource(video.url);
+
+                // Subtítulos
+                const tracks = mainPlayer.querySelectorAll('track');
+                tracks.forEach(t => t.remove());
+                if (video.subtitle) {
+                    const track = document.createElement('track');
+                    track.kind = 'subtitles';
+                    track.label = 'Español';
+                    track.srclang = 'es';
+                    track.src = video.subtitle;
+                    track.default = true;
+                    mainPlayer.appendChild(track);
+                }
+
+                stopThumbnailQueue();
+
+                // Si usamos HLS, esperamos al evento; si no, directo
+                if (hlsInstance) {
+                    hlsInstance.once(Hls.Events.MANIFEST_PARSED, () => startPlayback());
+                } else {
+                    startPlayback();
+                }
             }
         }
 // Formatea el nombre del video con el tamaño legible si está disponible
@@ -1642,7 +1883,7 @@ function formatVideoTitleWithSize(video) {
         setTimeout(() => videoInfo.classList.remove('active'), 3000);
 
         updateVideoQuickActions();
-    }, 500);
+    }, isLocalFileUrl(currentVideos[index].url) ? 0 : 500); // el fundido solo hace falta en el <video> web
 }
 
 
@@ -1778,6 +2019,7 @@ function togglePrivacyMode() {
         privacyFrame.style.display = 'block';
         privacyFrame.src = 'agenda.html';
         mainPlayer.pause();
+        if (nativeVideo.active) py.native_video_command('pause');
     } else {
         privacyFrame.src = 'about:blank';
 
@@ -1789,6 +2031,8 @@ function togglePrivacyMode() {
                 // pero al menos nos aseguramos de que el video nativo se reanude si aplica.
                 // Intentamos reanudar el reproductor externo si es posible
                 externalPlayer.contentWindow.postMessage('{"event":"command","func":"playVideo","args":""}', '*');
+            } else if (nativeVideo.active) {
+                py.native_video_command('resume');
             } else {
                 mainPlayer.play().catch(() => {});
             }
@@ -1812,7 +2056,9 @@ window.addEventListener('keydown', (e) => {
 
     const browserIsOpen = browserScreen && browserScreen.style.display !== 'none';
 
-    if (browserIsOpen) {
+    if (document.body.classList.contains('ui-collapsed')) {
+        setCinemaMode(false);
+    } else if (browserIsOpen) {
         if (typeof toggleBrowserBar === 'function') toggleBrowserBar();
     } else {
         togglePrivacyMode();
@@ -1859,7 +2105,7 @@ function renderBrowser(data) {
         const box = document.createElement('div');
         box.className = 'folder-box';
         box.innerHTML = `<span class="icon">📁</span><span class="name">${folder}</span>`;
-        box.onclick = () => openBrowser(data.currentPath + '/' + folder);
+        box.onclick = () => openBrowser(`${data.currentPath.replace(/\/+$/, '')}/${folder}`);
         browserList.appendChild(box);
     });
 }
@@ -1971,41 +2217,37 @@ playlistSidebar.addEventListener('mouseleave', () => {
 });
 
 // Full UI / Cinema Mode Toggle (🚀 Restaurado)
-toggleUiBtn.addEventListener('click', () => {
-    const isCinemaMode = document.body.classList.toggle('ui-collapsed');
+const CINEMA_ON_ICON = '<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z"/></svg>';
+const CINEMA_OFF_ICON = '<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg>';
+let cinemaViaWindow = false; // pantalla completa pedida a Qt (sin gesto del usuario, p. ej. desde el reproductor nativo)
+
+function setCinemaMode(on) {
+    document.body.classList.toggle('ui-collapsed', on);
+    if (appContainer) appContainer.classList.toggle('sidebar-collapsed', on);
+    toggleUiBtn.innerHTML = on ? CINEMA_ON_ICON : CINEMA_OFF_ICON;
+
     const docElm = document.documentElement;
-
-    if (isCinemaMode) {
-        if (appContainer) appContainer.classList.add('sidebar-collapsed');
-
-        // Intentar pantalla completa con alta compatibilidad
+    if (on) {
+        // La Fullscreen API exige un gesto del usuario; si la rechaza, Qt pone la ventana a pantalla completa.
+        const fallback = () => { cinemaViaWindow = true; py.set_window_fullscreen(true); };
         try {
-            if (docElm.requestFullscreen) docElm.requestFullscreen();
-            else if (docElm.mozRequestFullScreen) docElm.mozRequestFullScreen();
-            else if (docElm.webkitRequestFullscreen) docElm.webkitRequestFullscreen();
-            else if (docElm.msRequestFullscreen) docElm.msRequestFullscreen();
+            const req = docElm.requestFullscreen ? docElm.requestFullscreen() : null;
+            if (req && req.catch) req.catch(fallback);
+            else if (!req) fallback();
         } catch (e) {
-            console.warn("Fullscreen denegado o no soportado");
+            fallback();
         }
-        // showNotification('Modo Cine activado', 'success');
-    } else {
-        if (appContainer) appContainer.classList.remove('sidebar-collapsed');
-
-        // Salir de pantalla completa con alta compatibilidad
-        try {
-            if (document.exitFullscreen) document.exitFullscreen();
-            else if (document.mozCancelFullScreen) document.mozCancelFullScreen();
-            else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
-            else if (document.msExitFullscreen) document.msExitFullscreen();
-        } catch (e) {
-            console.warn("Error al salir de Fullscreen");
-        }
-        // showNotification('Interfaz restaurada', 'success');
+    } else if (document.fullscreenElement) {
+        document.exitFullscreen().catch(() => {});
+    } else if (cinemaViaWindow) {
+        cinemaViaWindow = false;
+        py.set_window_fullscreen(false);
     }
+    setTimeout(syncNativeGeometry, 50);
+}
 
-    toggleUiBtn.innerHTML = isCinemaMode
-        ? '<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z"/></svg>'
-        : '<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg>';
+toggleUiBtn.addEventListener('click', () => {
+    setCinemaMode(!document.body.classList.contains('ui-collapsed'));
 });
 
 // Sincronizar si el usuario sale manualmente (ej. tecla ESC)
@@ -2345,6 +2587,14 @@ if (playerLoader) {
     mainPlayer.addEventListener('playing', hideLoader);
     mainPlayer.addEventListener('error', () => {
         hideLoader();
+        const video = currentVideos[currentIndex];
+        // Sin ffprobe no se detecta antes: si el <video> no soporta el formato, pasar al nativo.
+        if (video && !nativeVideo.active && isLocalFileUrl(video.url)
+            && mainPlayer.getAttribute('src') && mainPlayer.error && mainPlayer.error.code === 4) {
+            const savedTime = playbackHistory.get(video.url) || 0;
+            startNativePlayback(video, savedTime > 0 ? savedTime : 5);
+            return;
+        }
         if (currentIndex !== -1 && currentVideos[currentIndex]) {
             showNotification('Error al reproducir el video', 'error');
             mainPlayer.pause();

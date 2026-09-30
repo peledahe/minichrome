@@ -883,10 +883,13 @@ class WebView(QWebEngineView):
 
     def _handle_fullscreen_request(self, request):
         """Sincroniza Fullscreen API web con fullscreen real de la ventana Qt."""
-        enable_fullscreen = bool(request.toggleOn())
         request.accept()
+        self.set_app_fullscreen(bool(request.toggleOn()))
 
+    def set_app_fullscreen(self, enable_fullscreen):
         if enable_fullscreen:
+            if self.main_win.isFullScreen():
+                return
             self._was_maximized_before_web_fullscreen = self.main_win.isMaximized()
             self.main_win.showFullScreen()
             return

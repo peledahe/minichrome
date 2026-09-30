@@ -389,7 +389,10 @@ body.privacy-active .logo {
 /* Mostrar al pasar el mouse por la pantalla en modo cine */
 .ui-collapsed:hover .header-left,
 .ui-collapsed:hover .user-actions,
-.ui-collapsed:hover .video-info {
+.ui-collapsed:hover .video-info,
+.ui-collapsed.native-hover .header-left,
+.ui-collapsed.native-hover .user-actions,
+.ui-collapsed.native-hover .video-info {
     opacity: 1;
     pointer-events: auto;
     transform: translateY(0);
@@ -432,7 +435,8 @@ body.privacy-active .logo {
 }
 
 .sidebar-collapsed .floating-title-container,
-.ui-collapsed:hover .floating-title-container {
+.ui-collapsed:hover .floating-title-container,
+.ui-collapsed.native-hover .floating-title-container {
     left: 20px;
 }
 
@@ -503,7 +507,8 @@ body.privacy-active .logo {
     transform: translateY(-5px);
 }
 
-.ui-collapsed:hover .floating-title-container {
+.ui-collapsed:hover .floating-title-container,
+.ui-collapsed.native-hover .floating-title-container {
     opacity: 1;
     transform: translateY(0);
 }

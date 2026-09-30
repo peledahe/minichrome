@@ -30,6 +30,12 @@ def _db():
     c.execute("CREATE TABLE IF NOT EXISTS app_config(key TEXT PRIMARY KEY, val TEXT)")
     c.execute("CREATE TABLE IF NOT EXISTS passwords(id INTEGER PRIMARY KEY, site TEXT, username TEXT, password TEXT, type TEXT DEFAULT 'web', url TEXT DEFAULT '', notes TEXT DEFAULT '', ts DATETIME DEFAULT CURRENT_TIMESTAMP)")
 
+    # Carpetas de favoritos (un nivel); fav.folder_id NULL = sin carpeta
+    c.execute("CREATE TABLE IF NOT EXISTS fav_folders(id INTEGER PRIMARY KEY, name TEXT, pos INTEGER DEFAULT 0)")
+    fav_cols = {row[1] for row in c.execute("PRAGMA table_info(fav)").fetchall()}
+    if 'folder_id' not in fav_cols:
+        c.execute("ALTER TABLE fav ADD COLUMN folder_id INTEGER DEFAULT NULL")
+
     # Migracion segura para instalaciones existentes
     notes_cols = {row[1] for row in c.execute("PRAGMA table_info(notes)").fetchall()}
     if 'x' not in notes_cols:
@@ -123,6 +129,9 @@ def _db():
     c.execute("INSERT OR IGNORE INTO app_config(key,val) VALUES(?,?)", ('imageSortBy', 'name-asc'))
     c.execute("INSERT OR IGNORE INTO app_config(key,val) VALUES(?,?)", ('imageLastFolder', '.'))
     c.execute("INSERT OR IGNORE INTO app_config(key,val) VALUES(?,?)", ('screenshotsPath', SCREENSHOTS_DIR))
+    # Reparar rutas guardadas con barras iniciales dobles ('//home/...')
+    while c.execute("UPDATE app_config SET val=substr(val,2) WHERE key IN ('mediaPath','imageMediaPath','screenshotsPath') AND val LIKE '//%'").rowcount:
+        pass
         
     c.commit(); return c
 
@@ -169,6 +178,36 @@ def get_favs():
 
 def del_fav(fid):
     c = _db(); c.execute("DELETE FROM fav WHERE id=?",(fid,)); c.commit(); c.close()
+
+def get_favs_full():
+    """(id, title, url, folder_id) de todos los favoritos, más recientes primero."""
+    c = _db(); res = c.execute("SELECT id, title, url, folder_id FROM fav ORDER BY id DESC").fetchall(); c.close(); return res
+
+def update_fav(fid, title, url):
+    c = _db(); c.execute("UPDATE fav SET title=?, url=? WHERE id=?", (title, url, fid)); c.commit(); c.close()
+
+def move_fav(fid, folder_id):
+    c = _db(); c.execute("UPDATE fav SET folder_id=? WHERE id=?", (folder_id, fid)); c.commit(); c.close()
+
+def get_fav_folders():
+    c = _db(); res = c.execute("SELECT id, name FROM fav_folders ORDER BY pos, name COLLATE NOCASE").fetchall(); c.close(); return res
+
+def add_fav_folder(name):
+    c = _db()
+    pos = c.execute("SELECT COALESCE(MAX(pos), 0) + 1 FROM fav_folders").fetchone()[0]
+    cur = c.execute("INSERT INTO fav_folders(name, pos) VALUES(?,?)", (name, pos))
+    c.commit(); fid = cur.lastrowid; c.close()
+    return fid
+
+def rename_fav_folder(folder_id, name):
+    c = _db(); c.execute("UPDATE fav_folders SET name=? WHERE id=?", (name, folder_id)); c.commit(); c.close()
+
+def del_fav_folder(folder_id):
+    """Borra la carpeta; sus favoritos pasan a "sin carpeta"."""
+    c = _db()
+    c.execute("UPDATE fav SET folder_id=NULL WHERE folder_id=?", (folder_id,))
+    c.execute("DELETE FROM fav_folders WHERE id=?", (folder_id,))
+    c.commit(); c.close()
 
 def save_history(title, url):
     if not url or url.startswith("data:") or url == "about:blank" or url.startswith("minichrome:"): return

@@ -1,22 +1,34 @@
 """Bridges QWebChannel: `py` (AgendaBridge) y `pw` (PasswordBridge)."""
 import os
+import re
 import json
 import base64
 import shutil
 import subprocess
 from datetime import datetime
 from PyQt6.QtWidgets import QApplication, QFileDialog
-from PyQt6.QtCore import QUrl, QObject, pyqtSlot, pyqtSignal, QStandardPaths, QBuffer, QIODevice
+from PyQt6.QtCore import QUrl, QObject, pyqtSlot, pyqtSignal, QStandardPaths, QBuffer, QIODevice, QProcess
 from PyQt6.QtGui import QImage
 from secure_store import encrypt, decrypt
 import google_sync
+import native_video
 from db import _db, cleanup_original_screenshot, get_screenshots_dir, save_screenshot
+
+_PATH_KEYS = ('mediaPath', 'imageMediaPath', 'screenshotsPath')
+
+
+def _clean_dir(path):
+    """Ruta absoluta normalizada; colapsa el '//' inicial que POSIX conserva."""
+    path = os.path.abspath(os.path.expanduser(str(path)))
+    return re.sub(r'^/{2,}', '/', path)
 
 # ─── Puente Agenda (Python <=> JS) ───────────────────────────────────────────
 class AgendaBridge(QObject):
 
     updated = pyqtSignal()
     google_changed = pyqtSignal()  # estado o datos de Google Calendar cambiaron
+    video_event = pyqtSignal(str)  # eventos del reproductor nativo (JSON)
+    video_thumbnail_ready = pyqtSignal(str, str)  # (url, data URL JPEG o "")
 
     @pyqtSlot()
     def close_app(self):
@@ -25,6 +37,7 @@ class AgendaBridge(QObject):
     def __init__(self, parent=None):
         super().__init__(parent)
         google_sync.manager().changed.connect(self.google_changed)
+        self._native_player = None
 
     # ─── Google Calendar (google_sync.py) ─────────────────────────────────────
     @pyqtSlot(result=str)
@@ -163,6 +176,8 @@ class AgendaBridge(QObject):
 
     @pyqtSlot(str, str)
     def set_config(self, key, val):
+        if key in _PATH_KEYS and val:
+            val = _clean_dir(val)
         c = _db(); c.execute("INSERT OR REPLACE INTO app_config(key,val) VALUES(?,?)", (key, val)); c.commit(); c.close()
         self.updated.emit()
 
@@ -170,7 +185,7 @@ class AgendaBridge(QObject):
     @pyqtSlot(result=str)
     def get_media_path(self):
         c = _db(); r = c.execute("SELECT val FROM app_config WHERE key='mediaPath'").fetchone(); c.close()
-        path = r[0] if r else os.path.expanduser("~/Videos")
+        path = _clean_dir(r[0]) if r and r[0] else os.path.expanduser("~/Videos")
         return path if os.path.exists(path) else os.path.expanduser("~")
 
     def _normalize_rel(self, rel_path):
@@ -518,7 +533,7 @@ class AgendaBridge(QObject):
             if not requested:
                 current = os.path.abspath(self.get_media_path())
             else:
-                current = os.path.abspath(os.path.expanduser(requested))
+                current = _clean_dir(requested)
 
             if not os.path.isdir(current):
                 current = os.path.abspath(self.get_media_path())
@@ -539,6 +554,69 @@ class AgendaBridge(QObject):
             })
         except Exception as e:
             return json.dumps({"error": str(e)})
+
+    # ─── Reproductor nativo (native_video.py) para H.264/H.265/AAC ───────────
+    def _local_video_path(self, url):
+        path = QUrl(url).toLocalFile() if url.startswith("file:") else ""
+        return path if path and os.path.isfile(path) else ""
+
+    def _native(self):
+        if self._native_player is None:
+            self._native_player = native_video.NativeVideoPlayer(self.parent())
+            self._native_player.media_event.connect(self.video_event)
+        return self._native_player
+
+    @pyqtSlot(str, result=str)
+    def video_playback_mode(self, url):
+        path = self._local_video_path(url)
+        return native_video.playback_mode(path) if path else "web"
+
+    @pyqtSlot(str, float, bool, result=bool)
+    def native_video_play(self, url, start, muted):
+        path = self._local_video_path(url)
+        if not path:
+            return False
+        self._native().play(path, start, muted)
+        return True
+
+    @pyqtSlot(str)
+    def native_video_command(self, cmd):
+        if self._native_player is not None:
+            self._native_player.command(cmd)
+
+    @pyqtSlot(str)
+    def native_video_layout(self, data):
+        if self._native_player is not None:
+            try:
+                self._native_player.set_layout(json.loads(data))
+            except (ValueError, TypeError, KeyError):
+                pass
+
+    @pyqtSlot(bool)
+    def set_window_fullscreen(self, on):
+        """Modo cine del visor cuando la Fullscreen API no está disponible (sin gesto del usuario)."""
+        view = self.parent()
+        if hasattr(view, "set_app_fullscreen"):
+            view.set_app_fullscreen(on)
+
+    @pyqtSlot(str)
+    def request_video_thumbnail(self, url):
+        """Miniatura con ffmpeg (asíncrona) para videos que la página no decodifica."""
+        path = self._local_video_path(url)
+        if not path or not shutil.which("ffmpeg"):
+            self.video_thumbnail_ready.emit(url, "")
+            return
+        proc = QProcess(self)
+
+        def done(*_):
+            data = bytes(proc.readAllStandardOutput())
+            proc.deleteLater()
+            uri = "data:image/jpeg;base64," + base64.b64encode(data).decode() if data else ""
+            self.video_thumbnail_ready.emit(url, uri)
+
+        proc.finished.connect(done)
+        proc.errorOccurred.connect(lambda e: e == QProcess.ProcessError.FailedToStart and done())
+        proc.start("ffmpeg", native_video.thumbnail_args(path))
 
     @pyqtSlot(str, result=str)
     def search_video(self, filename):
@@ -567,7 +645,7 @@ class AgendaBridge(QObject):
     @pyqtSlot(result=str)
     def get_image_media_path(self):
         c = _db(); r = c.execute("SELECT val FROM app_config WHERE key='imageMediaPath'").fetchone(); c.close()
-        path = r[0] if r and r[0] else os.path.expanduser("~/Pictures")
+        path = _clean_dir(r[0]) if r and r[0] else os.path.expanduser("~/Pictures")
         if not os.path.isdir(path):
             path = os.path.expanduser("~")
         return path
@@ -588,7 +666,7 @@ class AgendaBridge(QObject):
         c.close()
         data = {k: v for k, v in rows}
         return json.dumps({
-            "imageMediaPath": data.get("imageMediaPath", self.get_image_media_path()),
+            "imageMediaPath": self.get_image_media_path(),
             "sortBy": data.get("imageSortBy", "name-asc"),
             "lastFolder": data.get("imageLastFolder", ".")
         })
@@ -728,7 +806,7 @@ class AgendaBridge(QObject):
         import json
         try:
             requested = (target_path or '').strip()
-            current = os.path.abspath(os.path.expanduser(requested if requested else self.get_image_media_path()))
+            current = _clean_dir(requested if requested else self.get_image_media_path())
             if not os.path.isdir(current):
                 current = os.path.abspath(self.get_image_media_path())
 
