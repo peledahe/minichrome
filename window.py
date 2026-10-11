@@ -747,7 +747,8 @@ class Minichrome(QMainWindow):
         self._anim.finished.connect(self._after_hide)
         self._anim.start()
 
-    CTRL_PEEK_ZONE = 48      # alto (px) de la franja superior derecha que muestra los controles
+    CTRL_PEEK_CORNER_W = 24  # ancho (px) del área activa en la esquina exacta superior derecha
+    CTRL_PEEK_CORNER_H = 24  # alto (px) del área activa en la esquina exacta superior derecha
     CTRL_PEEK_MARGIN = 28    # margen alrededor de los controles antes de volver a ocultarlos
     CTRL_PEEK_HIDE_TICKS = 4  # ~0,5 s fuera antes de ocultar
 
@@ -758,8 +759,8 @@ class Minichrome(QMainWindow):
         inside_window = self.rect().contains(pos)
         ctrl = self._win_ctrl
         if not self._ctrl_peek:
-            zone_left = self.width() - ctrl.sizeHint().width() - 40
-            if inside_window and pos.y() <= self.CTRL_PEEK_ZONE and pos.x() >= zone_left:
+            zone_left = self.width() - self.CTRL_PEEK_CORNER_W
+            if inside_window and pos.y() <= self.CTRL_PEEK_CORNER_H and pos.x() >= zone_left:
                 self._ctrl_peek = True
                 self._ctrl_peek_out = 0
                 ctrl.adjustSize()
