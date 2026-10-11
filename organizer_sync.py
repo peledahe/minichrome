@@ -444,7 +444,10 @@ class OrganizerDriveSync(QObject):
             except Exception as ex:
                 result = {"ok": False, "error": str(ex)}
             for rid in ids or [None]:
-                self.finished.emit({**result, "reqId": rid})
+                try:
+                    self.finished.emit({**result, "reqId": rid})
+                except Exception:
+                    pass
             with self._lock:
                 if self._pending is None:
                     self._running = False

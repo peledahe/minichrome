@@ -172,8 +172,76 @@ def _paged(method, token, key, **params):
             return out
 
 
+def unwrap_slack_url(url):
+    """Si la URL es una redirección de Slack (slack-redir.net), extrae la URL final directa."""
+    if not url:
+        return ""
+    try:
+        url_str = str(url).strip()
+        p = urllib.parse.urlsplit(url_str)
+        if "slack-redir.net" in p.netloc:
+            qs = urllib.parse.parse_qs(p.query)
+            for param in ("url", "target", "dest", "destination"):
+                val = qs.get(param, [None])[0]
+                if val:
+                    return urllib.parse.unquote(val)
+    except Exception:
+        pass
+    return url_str
+
+
 # ─── Texto de Slack (mrkdwn) → HTML simple de Qt ──────────────────────────────
 _TOKEN_RE = re.compile(r"<([^<>]+)>")
+
+
+def extract_message_urls(m):
+    """Extrae todas las URLs del mensaje (adjuntos, texto, bloques, archivos)."""
+    urls = []
+    seen = set()
+
+    def add(u):
+        if not u:
+            return
+        clean = unwrap_slack_url(u.strip())
+        if clean and clean.startswith(("http://", "https://")) and clean not in seen:
+            seen.add(clean)
+            urls.append(clean)
+
+    for a in m.get("attachments") or []:
+        add(a.get("title_link"))
+        add(a.get("from_url"))
+        add(a.get("original_url"))
+        add(a.get("author_link"))
+        for act in a.get("actions") or []:
+            if isinstance(act, dict):
+                add(act.get("url"))
+
+    text = m.get("text") or ""
+    for tm in _TOKEN_RE.finditer(text):
+        target = tm.group(1).split("|")[0]
+        if target.startswith(("http://", "https://")):
+            add(html.unescape(target))
+    for plain_url in re.findall(r"https?://[^\s<>\"'|]+", text):
+        add(html.unescape(plain_url))
+
+    def scan_blocks(obj):
+        if isinstance(obj, dict):
+            if "url" in obj and isinstance(obj["url"], str):
+                add(obj["url"])
+            for v in obj.values():
+                scan_blocks(v)
+        elif isinstance(obj, list):
+            for item in obj:
+                scan_blocks(item)
+
+    if m.get("blocks"):
+        scan_blocks(m["blocks"])
+
+    for f in m.get("files") or []:
+        add(f.get("permalink"))
+        add(f.get("url_private"))
+
+    return urls
 
 
 def mrkdwn_to_html(text, users, channels):
@@ -190,11 +258,11 @@ def mrkdwn_to_html(text, users, channels):
         if target.startswith("!"):
             word = label or target[1:].split("^")[0]
             return f"<b style='color:#ffd479'>@{html.escape(word)}</b>"
-        url = html.unescape(target)
+        url = unwrap_slack_url(html.unescape(target))
         if not re.match(r"^(https?|mailto):", url, re.I):
             return html.escape(body)
         shown = label or html.escape(url)   # la etiqueta ya viene escapada por Slack
-        return f"<a href=\"{html.escape(url, quote=True)}\" style='color:#7fb2ff'>{shown}</a>"
+        return f"<a href=\"{html.escape(url, quote=True)}\" style='color:#7fb2ff; text-decoration:underline;'>{shown}</a>"
 
     parts, last = [], 0
     for m in _TOKEN_RE.finditer(text or ""):
@@ -481,16 +549,32 @@ class SlackClient(QObject):
         text = m.get("text") or ""
         extras = []
         for f in m.get("files") or []:
-            extras.append(f"📎 {html.escape(f.get('title') or f.get('name') or 'archivo')}")
+            fname = html.escape(f.get('title') or f.get('name') or 'archivo')
+            furl = f.get('permalink') or f.get('url_private')
+            if furl:
+                clean_furl = unwrap_slack_url(furl)
+                extras.append(f"📎 <a href=\"{html.escape(clean_furl, quote=True)}\" style='color:#7fb2ff; text-decoration:underline;'>{fname}</a>")
+            else:
+                extras.append(f"📎 {fname}")
         for a in m.get("attachments") or []:
             title = a.get("title") or a.get("fallback")
+            link = a.get("title_link") or a.get("from_url") or a.get("original_url")
             if title and title not in text:
-                extras.append(f"🔗 {html.escape(title)}")
+                if link:
+                    clean_link = unwrap_slack_url(link)
+                    extras.append(f"🔗 <a href=\"{html.escape(clean_link, quote=True)}\" style='color:#7fb2ff; text-decoration:underline;'>{html.escape(title)}</a>")
+                else:
+                    extras.append(f"🔗 {html.escape(title)}")
         ts = float(m.get("ts", "0") or 0)
         body = mrkdwn_to_html(text, users, chan_names)
         if extras:
             body += ("<br>" if body else "") + "<br>".join(f"<span style='color:#9aa6c8'>{e}</span>" for e in extras)
         base = (team.get("url") or "https://slack.com/").rstrip("/")
+
+        urls = extract_message_urls(m)
+        ext_urls = [u for u in urls if "slack.com" not in urllib.parse.urlsplit(u).netloc.lower()]
+        primary_url = ext_urls[0] if ext_urls else (urls[0] if urls else None)
+
         return {
             "id": f"{chan['id']}:{m.get('ts')}",
             "ts": ts,
@@ -504,6 +588,7 @@ class SlackClient(QObject):
                                + [html.unescape(re.sub(r"<[^>]+>", "", e)) for e in extras]).lower(),
             "replies": int(m.get("reply_count") or 0),
             "slack_ts": m.get("thread_ts") or m.get("ts") or "",
+            "primary_url": primary_url,
             "permalink": f"{base}/archives/{chan['id']}/p{(m.get('ts') or '').replace('.', '')}",
         }
 

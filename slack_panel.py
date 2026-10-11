@@ -50,7 +50,10 @@ class MessageCard(QFrame):
         self._open_url = open_url
         self.setObjectName("msg")
         self.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-        self.setToolTip("Abrir en Slack")
+        if msg.get("primary_url"):
+            self.setToolTip(f"Abrir enlace directo:\n{msg['primary_url']}")
+        else:
+            self.setToolTip("Abrir en Slack")
         self.setStyleSheet("#msg{background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.05);"
                            "border-radius:12px;} #msg:hover{background:rgba(255,255,255,0.07);}")
         v = QVBoxLayout(self)
@@ -80,6 +83,16 @@ class MessageCard(QFrame):
         t = QLabel(msg["time"])
         t.setStyleSheet("color:rgba(190,200,230,0.45); font-size:11px;")
         top.addWidget(t)
+        if msg.get("primary_url"):
+            sb = QPushButton("Slack")
+            sb.setFixedSize(38, 20)
+            sb.setToolTip("Abrir este mensaje en Slack")
+            sb.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+            sb.setStyleSheet("QPushButton{background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.1);"
+                             "border-radius:6px; color:rgba(255,255,255,0.5); font-size:10px; font-weight:600;}"
+                             "QPushButton:hover{background:rgba(224,30,90,0.3); color:white; border-color:rgba(224,30,90,0.6);}")
+            sb.clicked.connect(lambda: self._open_url(self.msg["permalink"]))
+            top.addWidget(sb)
         if on_reply:
             rb = QPushButton("↩")
             rb.setFixedSize(20, 20)
@@ -112,7 +125,8 @@ class MessageCard(QFrame):
 
     def mouseReleaseEvent(self, e):
         if e.button() == Qt.MouseButton.LeftButton:
-            self._open_url(self.msg["permalink"])
+            target_url = self.msg.get("primary_url") or self.msg["permalink"]
+            self._open_url(target_url)
         super().mouseReleaseEvent(e)
 
 

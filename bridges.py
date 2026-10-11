@@ -51,12 +51,35 @@ class AgendaBridge(QObject):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        google_sync.manager().changed.connect(self.google_changed)
+        google_sync.manager().changed.connect(self._on_google_changed)
         sync = organizer_sync.manager()
-        sync.finished.connect(lambda res: self.organizer_sync_done.emit(json.dumps(res)))
+        sync.finished.connect(self._on_sync_finished)
         # Cualquier cambio hecho desde la página se sube a Drive al poco tiempo.
         self.updated.connect(sync.schedule)
+        self.destroyed.connect(self._cleanup_connections)
         self._native_player = None
+
+    def _on_sync_finished(self, res):
+        try:
+            self.organizer_sync_done.emit(json.dumps(res))
+        except (RuntimeError, AttributeError):
+            pass
+
+    def _on_google_changed(self):
+        try:
+            self.google_changed.emit()
+        except (RuntimeError, AttributeError):
+            pass
+
+    def _cleanup_connections(self, *_):
+        try:
+            organizer_sync.manager().finished.disconnect(self._on_sync_finished)
+        except Exception:
+            pass
+        try:
+            google_sync.manager().changed.disconnect(self._on_google_changed)
+        except Exception:
+            pass
 
     # ─── Google Calendar (google_sync.py) ─────────────────────────────────────
     @pyqtSlot(result=str)

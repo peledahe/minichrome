@@ -740,6 +740,10 @@ class Minichrome(QMainWindow):
         self._anim.stop()
         self._anim.setStartValue(self._chrome.pos())
         self._anim.setEndValue(QPoint((self.width() - self._chrome.width())//2, -self.TOTAL - 20))
+        try:
+            self._anim.finished.disconnect(self._after_hide)
+        except Exception:
+            pass
         self._anim.finished.connect(self._after_hide)
         self._anim.start()
 
@@ -774,7 +778,10 @@ class Minichrome(QMainWindow):
             ctrl.hide()
 
     def _after_hide(self):
-        self._anim.finished.disconnect(self._after_hide)
+        try:
+            self._anim.finished.disconnect(self._after_hide)
+        except Exception:
+            pass
         self._notch.show()
         self._notch.raise_()
 
