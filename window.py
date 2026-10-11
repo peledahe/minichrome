@@ -7,17 +7,22 @@ from datetime import datetime
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QPushButton,
     QLabel, QSizePolicy, QFrame, QScrollArea, QListWidget, QListWidgetItem, QDialog,
-    QStackedLayout, QDateEdit, QMenu, QTreeWidget, QTreeWidgetItem, QAbstractItemView
+    QStackedLayout, QDateEdit, QMenu, QTreeWidget, QTreeWidgetItem, QAbstractItemView,
+    QFileDialog
 )
 from PyQt6.QtCore import (
     QUrl, QUrlQuery, Qt, QTimer, QPropertyAnimation, QEasingCurve, QPoint, QRect, QDate, QSize, pyqtSignal
 )
-from PyQt6.QtGui import QColor, QCursor, QFont, QIcon
+from PyQt6.QtGui import QColor, QCursor, QFont, QIcon, QPixmap
 from config import BASE, HOME, load_settings, save_settings
 from db import (add_fav_folder, clear_history, clear_history_by_dates, clear_history_by_domain, del_fav, del_fav_folder, del_history,
                 get_config, get_fav_folders, get_favs_full, get_history, move_fav, rename_fav_folder, update_fav, get_screenshots_dir, get_url_history, save_fav, save_screenshot, set_config)
 from widgets import BTN_NAV, Notif, _shadow
 from browser import WebView, profile
+import google_sync
+import organizer_sync
+import extensions
+import slack_panel
 
 # ─── Árbol de favoritos (carpetas + arrastrar y soltar) ───────────────────────
 _FAV_ROLE = Qt.ItemDataRole.UserRole          # ("folder", id, nombre) | ("fav", id, folder_id, url, título)
@@ -124,6 +129,14 @@ class Minichrome(QMainWindow):
         # ── Notch (siempre visible cuando barra oculta) ───────────────────────
         self._notch = self._build_notch(root)
         self._notch.hide()
+        # Con la barra recogida, los controles de ventana aparecen al acercar el
+        # ratón a la esquina superior derecha. La página web se queda con los
+        # eventos del ratón, así que se consulta la posición del cursor.
+        self._ctrl_peek = False
+        self._ctrl_peek_out = 0
+        self._ctrl_peek_timer = QTimer(self)
+        self._ctrl_peek_timer.setInterval(120)
+        self._ctrl_peek_timer.timeout.connect(self._check_ctrl_peek)
 
         # ── Área de vistas web ────────────────────────────────────────────────
         self._web_wrap = QWidget()
@@ -139,9 +152,18 @@ class Minichrome(QMainWindow):
 
         # ── Agarraderas para redimensionar (Edge Grips) ───────────────────────
         self._build_resize_grips(root)
-        # ── Panel lateral de Favoritos e Historial ─────────────────────────────
+        # ── Panel lateral de Favoritos, Historial y Extensiones ────────────────
         self._fav_panel = self._build_fav_panel(root)
         self._hist_panel = self._build_hist_panel(root)
+        self._ext_panel = self._build_extensions_panel(root)
+        self._ext_app_panel = None   # panel lateral con la interfaz de una extensión
+        # Panel de mensajes de Slack (slack_panel.py)
+        self._slack_open = False
+        self._slack_panel = slack_panel.SlackPanel(root, self.new_tab,
+                                                   lambda: self._slack_open and self._toggle_slack_panel())
+        self._slack_anim = QPropertyAnimation(self._slack_panel, b"pos")
+        self._slack_anim.setDuration(300)
+        self._slack_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
 
         # ── Funciones estándar (descargas, búsqueda, sesión) ──────────────────
         notify = lambda t, b: Notif(t, b, self)
@@ -151,6 +173,12 @@ class Minichrome(QMainWindow):
         profile().downloadRequested.connect(self._downloads.handle_request)
         profile().setNotificationPresenter(self._present_web_notification)
         QApplication.instance().aboutToQuit.connect(self._save_session)
+        google_sync.manager().open_auth_url.connect(self.new_tab)
+        # Organizador ⇄ Drive (mismo archivo que Mk Organizer y su extensión)
+        self._org_google_connected = organizer_sync.manager().connected()
+        google_sync.manager().changed.connect(self._on_google_changed_for_organizer)
+        organizer_sync.manager().start_periodic()
+        google_sync.manager().close_auth_url.connect(self._close_auth_tab)
 
         self._open_initial_tabs()
         QTimer.singleShot(100, self._reposition)
@@ -227,14 +255,36 @@ class Minichrome(QMainWindow):
         """)
         self._url.returnPressed.connect(self._navigate)
 
+        self._cws_install_btn = QPushButton("➕ Instalar en Minichrome")
+        self._cws_install_btn.setFixedHeight(22)
+        self._cws_install_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self._cws_install_btn.setToolTip("Instalar esta extensión en Minichrome")
+        self._cws_install_btn.setStyleSheet("""
+            QPushButton {
+                background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #8e44ad, stop:1 #6c5ce7);
+                border: 1px solid rgba(255, 255, 255, 0.35);
+                border-radius: 6px;
+                color: white;
+                font-size: 11px;
+                font-weight: bold;
+                padding: 0 10px;
+            }
+            QPushButton:hover {
+                background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #9b59b6, stop:1 #7d6cf7);
+            }
+        """)
+        self._cws_install_btn.clicked.connect(self._install_current_cws_extension)
+        self._cws_install_btn.hide()
+
         # Contenedor conjunto icono+url sin gap interno
         url_wrap = QWidget()
         url_wrap.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         url_h = QHBoxLayout(url_wrap)
         url_h.setContentsMargins(0, 0, 0, 0)
-        url_h.setSpacing(2)
+        url_h.setSpacing(4)
         url_h.addWidget(self._sec)
         url_h.addWidget(self._url)
+        url_h.addWidget(self._cws_install_btn)
 
         # ── Controles de Zoom ─────────────────────────────────────────────
         ZOOM_BTN = """QPushButton{background:rgba(255,255,255,0.1);border:none;
@@ -444,6 +494,8 @@ class Minichrome(QMainWindow):
         specs = [
             ("◷", "#3498db", self._toggle_hist_panel, "Historial de navegación"),
             ("★", "#9b59b6", self._toggle_fav_panel, "Favoritos guardados"),
+            ("🧩", "#8e44ad", self._toggle_extensions_panel, "Extensiones de Chrome"),
+            ("💬", "#e01e5a", self._toggle_slack_panel, "Mensajes de Slack"),
             ("—", "#febc2e", self.showMinimized, "Minimizar ventana"),
             ("2x", "#16a085", self._expand_two_screens_left, "Expandir a 2 pantallas desde la izquierda (Ctrl+Shift+2)"),
             ("▢", "#28c840", self._toggle_max, "Maximizar / Restaurar"),
@@ -556,6 +608,17 @@ class Minichrome(QMainWindow):
         if hasattr(self, '_hist_open'):
             self._hist_panel.setGeometry(m if self._hist_open else -hw - 24, m, hw, ph)
             self._hist_panel.raise_()
+
+        ew = self._ext_panel.width()
+        if hasattr(self, '_ext_open'):
+            self._ext_panel.setGeometry(W - ew - m if self._ext_open else W + 24, m, ew, ph)
+            self._ext_panel.raise_()
+        if getattr(self, '_ext_app_panel', None):
+            self._ext_app_panel.relayout()
+        if hasattr(self, '_slack_panel'):
+            sw = self._slack_panel.width()
+            self._slack_panel.setGeometry(W - sw - m if self._slack_open else W + 24, m, sw, ph)
+            self._slack_panel.raise_()
             
         # controles ventana top-right
         self._win_ctrl.adjustSize()
@@ -658,6 +721,8 @@ class Minichrome(QMainWindow):
     # ── Mostrar / Ocultar barra ───────────────────────────────────────────────
     def _show_bar(self):
         self._bar_open = True
+        self._ctrl_peek_timer.stop()
+        self._ctrl_peek = False
         self._notch.hide()
         self._win_ctrl.show()
         self._anim.stop()
@@ -669,12 +734,44 @@ class Minichrome(QMainWindow):
     def _hide_bar(self):
         self._bar_open = False
         self._win_ctrl.hide()
+        self._ctrl_peek = False
+        self._ctrl_peek_timer.start()
         self._place_overlays()
         self._anim.stop()
         self._anim.setStartValue(self._chrome.pos())
         self._anim.setEndValue(QPoint((self.width() - self._chrome.width())//2, -self.TOTAL - 20))
         self._anim.finished.connect(self._after_hide)
         self._anim.start()
+
+    CTRL_PEEK_ZONE = 48      # alto (px) de la franja superior derecha que muestra los controles
+    CTRL_PEEK_MARGIN = 28    # margen alrededor de los controles antes de volver a ocultarlos
+    CTRL_PEEK_HIDE_TICKS = 4  # ~0,5 s fuera antes de ocultar
+
+    def _check_ctrl_peek(self):
+        if self._bar_open or not self.isVisible() or self.isMinimized():
+            return
+        pos = self.mapFromGlobal(QCursor.pos())
+        inside_window = self.rect().contains(pos)
+        ctrl = self._win_ctrl
+        if not self._ctrl_peek:
+            zone_left = self.width() - ctrl.sizeHint().width() - 40
+            if inside_window and pos.y() <= self.CTRL_PEEK_ZONE and pos.x() >= zone_left:
+                self._ctrl_peek = True
+                self._ctrl_peek_out = 0
+                ctrl.adjustSize()
+                ctrl.move(self.width() - ctrl.width() - 4, 4)
+                ctrl.show()
+                ctrl.raise_()
+            return
+        near = ctrl.geometry().adjusted(-self.CTRL_PEEK_MARGIN, -self.CTRL_PEEK_MARGIN,
+                                        self.CTRL_PEEK_MARGIN, self.CTRL_PEEK_MARGIN)
+        if (inside_window and near.contains(pos)) or QApplication.activePopupWidget():
+            self._ctrl_peek_out = 0   # sigue cerca, o hay un menú (⋮) abierto
+            return
+        self._ctrl_peek_out += 1
+        if self._ctrl_peek_out >= self.CTRL_PEEK_HIDE_TICKS:
+            self._ctrl_peek = False
+            ctrl.hide()
 
     def _after_hide(self):
         self._anim.finished.disconnect(self._after_hide)
@@ -902,6 +999,7 @@ class Minichrome(QMainWindow):
             self._fav_open = True
             self._fav_timer.start(2000)
             if hasattr(self, '_hist_open') and self._hist_open: self._toggle_hist_panel()
+            if getattr(self, '_slack_open', False): self._toggle_slack_panel()
         else:
             self._fav_anim.setEndValue(QPoint(W + 24, m))
             self._fav_open = False
@@ -1643,6 +1741,358 @@ class Minichrome(QMainWindow):
         store.loadAllCookies()
         QTimer.singleShot(600, finalize)
 
+    # ── Panel de Extensiones de Chrome ─────────────────────────────────────────
+    def _build_extensions_panel(self, parent):
+        self._ext_open = False
+        frame, self._ext_list, self._ext_count, self._ext_search = self._build_side_card(
+            parent, 420, "🧩", "Extensiones", "Buscar extensiones instaladas…",
+            lambda: self._ext_open and self._toggle_extensions_panel(),
+            header_buttons=[("＋", "Cargar extensión descomprimida…", self._load_unpacked_extension)]
+        )
+
+        self._ext_timer = QTimer(frame)
+        self._ext_timer.setSingleShot(True)
+        self._ext_timer.timeout.connect(lambda: self._toggle_extensions_panel() if self._ext_open else None)
+        self._side_leave_timer(frame, self._ext_timer, self._ext_search)
+
+        PANEL_BTN = """QPushButton{font-size:12px; background:rgba(255,255,255,0.05);
+            border:1px solid rgba(255,255,255,0.08); border-radius:9px;
+            color:rgba(230,236,255,0.8); padding:7px 10px;}
+            QPushButton:hover{background:rgba(142,68,173,0.3); color:white;
+            border-color:rgba(142,68,173,0.6);}"""
+
+        h_btns1 = QHBoxLayout()
+        h_btns1.setSpacing(6)
+        btn_store = QPushButton("🌐  Desde Chrome Web Store")
+        btn_store.setToolTip("Instalar pegando el enlace o ID de la Chrome Web Store")
+        btn_store.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        btn_store.setStyleSheet(PANEL_BTN)
+        btn_store.clicked.connect(self._install_from_webstore_dialog)
+
+        btn_open_store = QPushButton("🛒  Abrir Tienda")
+        btn_open_store.setToolTip("Explorar la Chrome Web Store en una nueva pestaña")
+        btn_open_store.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        btn_open_store.setStyleSheet(PANEL_BTN)
+        btn_open_store.clicked.connect(lambda: (self.new_tab("https://chromewebstore.google.com/"), self._toggle_extensions_panel()))
+
+        h_btns1.addWidget(btn_store, 3)
+        h_btns1.addWidget(btn_open_store, 2)
+        frame.layout().addLayout(h_btns1)
+
+        h_btns2 = QHBoxLayout()
+        h_btns2.setSpacing(6)
+        btn_add = QPushButton("＋  Descomprimida")
+        btn_add.setToolTip("Cargar desde una carpeta local con manifest.json")
+        btn_add.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        btn_add.setStyleSheet(PANEL_BTN)
+        btn_add.clicked.connect(self._load_unpacked_extension)
+
+        btn_crx = QPushButton("📦  Archivo .CRX/.ZIP")
+        btn_crx.setToolTip("Instalar desde un archivo .crx o .zip local")
+        btn_crx.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        btn_crx.setStyleSheet(PANEL_BTN)
+        btn_crx.clicked.connect(self._install_from_crx_dialog)
+
+        btn_reload = QPushButton("↻")
+        btn_reload.setToolTip("Recargar todas las extensiones")
+        btn_reload.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        btn_reload.setStyleSheet(PANEL_BTN)
+        btn_reload.setFixedWidth(36)
+        btn_reload.clicked.connect(lambda: (extensions.manager().reload_all(), self._refresh_extensions(), Notif("Extensiones", "Extensiones recargadas.", self.centralWidget())))
+
+        h_btns2.addWidget(btn_add, 2)
+        h_btns2.addWidget(btn_crx, 2)
+        h_btns2.addWidget(btn_reload, 0)
+        frame.layout().addLayout(h_btns2)
+
+        self._ext_search.textChanged.connect(self._ext_filter)
+        self._ext_anim = QPropertyAnimation(frame, b"pos")
+        self._ext_anim.setDuration(300)
+        self._ext_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+
+        extensions.manager().extensions_changed.connect(self._refresh_extensions)
+        return frame
+
+    def _toggle_slack_panel(self):
+        sw = self._slack_panel.width()
+        W = self.width()
+        m = self.SIDE_MARGIN
+        self._slack_anim.stop()
+        self._slack_anim.setStartValue(self._slack_panel.pos())
+        if not self._slack_open:
+            if getattr(self, '_fav_open', False): self._toggle_fav_panel()
+            if getattr(self, '_ext_open', False): self._toggle_extensions_panel()
+            self._slack_panel.raise_()
+            self._slack_anim.setEndValue(QPoint(W - sw - m, m))
+            self._slack_open = True
+            self._slack_panel.opened()
+        else:
+            self._slack_anim.setEndValue(QPoint(W + 24, m))
+            self._slack_open = False
+            self._slack_panel.closed()
+        self._slack_anim.start()
+
+    def _toggle_extensions_panel(self):
+        ew = self._ext_panel.width()
+        W = self.width()
+        m = self.SIDE_MARGIN
+        self._ext_anim.stop()
+        self._ext_anim.setStartValue(self._ext_panel.pos())
+        if not self._ext_open:
+            self._refresh_extensions()
+            self._ext_search.clear()
+            self._ext_panel.raise_()
+            self._ext_anim.setEndValue(QPoint(W - ew - m, m))
+            self._ext_open = True
+            self._ext_timer.start(2500)
+            if getattr(self, '_fav_open', False): self._toggle_fav_panel()
+            if getattr(self, '_hist_open', False): self._toggle_hist_panel()
+            if getattr(self, '_slack_open', False): self._toggle_slack_panel()
+        else:
+            self._ext_anim.setEndValue(QPoint(W + 24, m))
+            self._ext_open = False
+            self._ext_timer.stop()
+        self._ext_anim.start()
+
+    def _ext_filter(self, text):
+        q = text.strip().lower()
+        for i in range(self._ext_list.count()):
+            item = self._ext_list.item(i)
+            key = (item.data(Qt.ItemDataRole.UserRole + 1) or "").lower()
+            item.setHidden(bool(q) and q not in key)
+
+    def _refresh_extensions(self):
+        self._ext_list.clear()
+        mgr = extensions.manager()
+        panel = getattr(self, "_ext_app_panel", None)
+        if panel:
+            cur = mgr.extensions.get(panel.extension.id)
+            if not cur or not cur.enabled or not cur.loaded:
+                panel.close_panel()
+        exts = list(mgr.extensions.values())
+        n = len(exts)
+        n_active = sum(1 for e in exts if e.enabled)
+        self._ext_count.setText(f"{n_active} activa{'s' if n_active != 1 else ''} de {n}")
+
+        if not exts:
+            self._side_empty(self._ext_list, "No hay extensiones instaladas.\nHaz clic en 'Cargar descomprimida' para agregar una.")
+            return
+
+        for ext in exts:
+            item = QListWidgetItem(self._ext_list)
+            item.setData(Qt.ItemDataRole.UserRole, ext.id)
+            item.setData(Qt.ItemDataRole.UserRole + 1, f"{ext.name} {ext.version} {ext.description}")
+
+            row_w = QWidget()
+            row_w.setStyleSheet("background: transparent;")
+            r_lay = QHBoxLayout(row_w)
+            r_lay.setContentsMargins(10, 8, 10, 8)
+            r_lay.setSpacing(10)
+
+            # Icono
+            ico_lbl = QLabel()
+            ico_lbl.setFixedSize(32, 32)
+            ico_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            if ext.icon_path and os.path.exists(ext.icon_path):
+                pix = QPixmap(ext.icon_path).scaled(28, 28, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                ico_lbl.setPixmap(pix)
+            else:
+                ico_lbl.setText("🧩")
+                ico_lbl.setStyleSheet("font-size: 20px; color: #8e44ad;")
+            r_lay.addWidget(ico_lbl, 0, Qt.AlignmentFlag.AlignTop)
+
+            # Textos: Nombre, versión, descripción
+            t_lay = QVBoxLayout()
+            t_lay.setSpacing(2)
+            name_lbl = QLabel(f"<b style='color:#ffffff; font-size:13px;'>{ext.name}</b> <span style='color:rgba(255,255,255,0.45); font-size:10px;'>v{ext.version}</span>")
+            name_lbl.setStyleSheet("background: transparent;")
+            t_lay.addWidget(name_lbl)
+
+            desc_text = f"⚠ {ext.error}" if ext.error else (ext.description or ext.path)
+            if len(desc_text) > 55:
+                desc_text = desc_text[:52] + "…"
+            desc_lbl = QLabel(desc_text)
+            desc_lbl.setStyleSheet(f"color: {'#ff8a80' if ext.error else 'rgba(200,210,240,0.6)'}; font-size: 10px; background: transparent;")
+            if ext.error:
+                desc_lbl.setToolTip(ext.error)
+            t_lay.addWidget(desc_lbl)
+
+            # Acciones en una segunda línea: en una sola fila no caben en el panel
+            a_lay = QHBoxLayout()
+            a_lay.setContentsMargins(0, 4, 0, 0)
+            a_lay.setSpacing(6)
+            t_lay.addLayout(a_lay)
+            r_lay.addLayout(t_lay, 1)
+
+            # Botón Abrir (Popup)
+            if ext.page and ext.enabled and ext.loaded:
+                btn_open = QPushButton("▶ Abrir")
+                btn_open.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+                btn_open.setToolTip("Abrir la extensión en el panel lateral" if ext.opens_in_panel else "Abrir la extensión en una pestaña")
+                btn_open.setStyleSheet("""
+                    QPushButton {
+                        background: rgba(81, 162, 255, 0.2);
+                        border: 1px solid rgba(81, 162, 255, 0.4);
+                        border-radius: 6px;
+                        color: #81a2ff;
+                        font-size: 11px;
+                        font-weight: 600;
+                        padding: 4px 8px;
+                    }
+                    QPushButton:hover {
+                        background: rgba(81, 162, 255, 0.4);
+                        color: white;
+                    }
+                """)
+                btn_open.clicked.connect(lambda _, e=ext: self._open_extension_popup(e))
+                a_lay.addWidget(btn_open)
+
+            # Botón Toggle (Activar/Desactivar)
+            btn_toggle = QPushButton("✔ Activa" if ext.enabled else "Inactiva")
+            btn_toggle.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+            btn_toggle.setToolTip("Habilitar o deshabilitar extensión")
+            btn_toggle.setStyleSheet(f"""
+                QPushButton {{
+                    background: {'rgba(46, 204, 113, 0.2)' if ext.enabled else 'rgba(255, 255, 255, 0.06)'};
+                    border: 1px solid {'rgba(46, 204, 113, 0.45)' if ext.enabled else 'rgba(255, 255, 255, 0.15)'};
+                    border-radius: 6px;
+                    color: {'#2ecc71' if ext.enabled else 'rgba(255, 255, 255, 0.5)'};
+                    font-size: 11px;
+                    font-weight: 600;
+                    padding: 4px 8px;
+                }}
+                QPushButton:hover {{
+                    background: {'rgba(46, 204, 113, 0.35)' if ext.enabled else 'rgba(255, 255, 255, 0.12)'};
+                    color: white;
+                }}
+            """)
+            btn_toggle.clicked.connect(lambda _, eid=ext.id, state=not ext.enabled: mgr.toggle_extension(eid, state))
+            a_lay.addWidget(btn_toggle)
+
+            # Botón Desinstalar
+            btn_del = QPushButton("🗑 Desinstalar")
+            btn_del.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+            btn_del.setToolTip(f"Desinstalar '{ext.name}' de Minichrome")
+            btn_del.setStyleSheet("""
+                QPushButton {
+                    background: rgba(255, 95, 87, 0.14);
+                    border: 1px solid rgba(255, 95, 87, 0.38);
+                    border-radius: 6px;
+                    color: #ff8a82;
+                    font-size: 11px;
+                    font-weight: 600;
+                    padding: 4px 8px;
+                }
+                QPushButton:hover {
+                    background: rgba(255, 95, 87, 0.32);
+                    color: #ffffff;
+                }
+            """)
+            btn_del.clicked.connect(lambda _, eid=ext.id, name=ext.name: self._del_extension(eid, name))
+            a_lay.addWidget(btn_del)
+            a_lay.addStretch()
+
+            row_w.adjustSize()
+            item.setSizeHint(row_w.sizeHint())
+            self._ext_list.setItemWidget(item, row_w)
+
+    def _on_google_changed_for_organizer(self):
+        # Al conectar la cuenta de Google se trae/sube el organizador una vez.
+        now = organizer_sync.manager().connected()
+        if now and not self._org_google_connected:
+            organizer_sync.manager().request()
+        self._org_google_connected = now
+
+    def _open_extension_popup(self, ext: extensions.ChromeExtension):
+        self._ext_timer.stop()
+        url = extensions.manager().page_url(ext)
+        if url is None:
+            msg = ext.error or f"La extensión '{ext.name}' no tiene ventana popup configurada."
+            Notif("Extensión", msg, self.centralWidget())
+            return
+        if not ext.opens_in_panel:
+            self.new_tab(url.toString())
+            self._toggle_extensions_panel()
+            return
+
+        if self._ext_open:
+            self._toggle_extensions_panel()
+        if self._ext_app_panel:
+            self._ext_app_panel.close_panel()
+        panel = extensions.ExtensionPanel(ext, url, self, self.centralWidget())
+        panel.closed.connect(lambda p=panel: self._ext_app_panel is p and setattr(self, "_ext_app_panel", None))
+        self._ext_app_panel = panel
+        panel.open_panel()
+
+    def _del_extension(self, ext_id: str, name: str):
+        if self._side_confirm(f"¿Desinstalar la extensión '{name}'?", "Se eliminarán los archivos y la configuración de Minichrome.", "Desinstalar"):
+            extensions.manager().remove_extension(ext_id)
+            self._refresh_extensions()
+            Notif("Extensión Desinstalada", f"'{name}' ha sido desinstalada correctamente.", self.centralWidget())
+
+    def _load_unpacked_extension(self):
+        self._ext_timer.stop()
+        default_dir = "/home/perry/Desarrollo/ChromeExtensions"
+        if not os.path.exists(default_dir):
+            default_dir = os.path.expanduser("~")
+
+        folder = QFileDialog.getExistingDirectory(
+            self,
+            "Seleccionar carpeta de Extensión de Chrome (con manifest.json)",
+            default_dir
+        )
+        if not folder:
+            return
+
+        mf_path = os.path.join(folder, "manifest.json")
+        if not os.path.exists(mf_path):
+            Notif("Error de Extensión", "La carpeta seleccionada no contiene un archivo manifest.json.", self.centralWidget())
+            return
+
+        ext = extensions.manager().install_extension(folder)
+        if ext:
+            Notif("Extensión Instalada", f"Se instaló '{ext.name}' v{ext.version} correctamente.", self.centralWidget())
+            self._refresh_extensions()
+        else:
+            Notif("Error de Extensión", "No se pudo leer el manifest.json de la extensión.", self.centralWidget())
+
+    def _install_from_webstore_dialog(self):
+        self._ext_timer.stop()
+        vals = self._side_prompt(
+            "🌐  Instalar de Chrome Web Store",
+            [("URL o ID de la extensión", "https://chromewebstore.google.com/detail/...")],
+            "Descargar e Instalar"
+        )
+        if not vals or not vals[0]:
+            return
+
+        input_text = vals[0].strip()
+        try:
+            ext = extensions.manager().install_from_webstore(input_text)
+            Notif("Extensión Instalada", f"'{ext.name}' v{ext.version} se descargó e instaló con éxito.", self.centralWidget())
+            self._refresh_extensions()
+        except Exception as err:
+            Notif("Error de Instalación", f"No se pudo instalar desde Chrome Web Store: {err}", self.centralWidget())
+
+    def _install_from_crx_dialog(self):
+        self._ext_timer.stop()
+        default_dir = "/home/perry/Descargas" if os.path.exists("/home/perry/Descargas") else os.path.expanduser("~")
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Seleccionar archivo de Extensión (.crx o .zip)",
+            default_dir,
+            "Extensiones de Chrome (*.crx *.zip);;Todos los archivos (*)"
+        )
+        if not file_path:
+            return
+
+        try:
+            ext = extensions.manager().install_from_crx_file(file_path)
+            Notif("Extensión Instalada", f"'{ext.name}' v{ext.version} instalada desde archivo.", self.centralWidget())
+            self._refresh_extensions()
+        except Exception as err:
+            Notif("Error de Instalación", f"No se pudo instalar el archivo: {err}", self.centralWidget())
+
     # ── Pestañas ─────────────────────────────────────────────────────────────
     def new_tab(self, url=HOME):
         view = WebView(self, url)
@@ -1655,6 +2105,7 @@ class Minichrome(QMainWindow):
         view.iconChanged.connect(lambda i, v=view: self._on_icon(v, i))
         view.loadStarted.connect(lambda v=view: self._start_loading(v))
         view.loadFinished.connect(lambda ok, v=view: self._stop_loading(v))
+        view.closeRequested.connect(lambda v=view: self._close_view(v))
         self._web_layout.addWidget(view)
         self._views.append(view)
 
@@ -1808,6 +2259,18 @@ class Minichrome(QMainWindow):
             if cls: cls[0].clicked.connect(lambda _, j=i: self._close_tab_safe(j))
         self._switch(new_idx)
 
+    def _close_view(self, view):
+        if view in self._views:
+            idx = self._views.index(view)
+            self._close_tab_safe(idx)
+
+    def _close_auth_tab(self):
+        for idx, view in enumerate(list(self._views)):
+            u = view.url().toString()
+            if "127.0.0.1:" in u or "accounts.google.com" in u:
+                self._close_tab_safe(idx)
+                break
+
     def _cur(self) -> WebView | None:
         return self._views[self._active] if 0 <= self._active < len(self._views) else None
 
@@ -1850,6 +2313,7 @@ class Minichrome(QMainWindow):
 
             self._url.setText("" if u.startswith("file://") else u)
             self._update_sec(u)
+            self._check_cws_extension_page(u)
 
     def _sync_url(self):
         v = self._cur()
@@ -1865,6 +2329,48 @@ class Minichrome(QMainWindow):
                     
             self._url.setText("" if u.startswith("file://") else u)
             self._update_sec(u)
+            self._check_cws_extension_page(u)
+
+    def _check_cws_extension_page(self, url_str):
+        if hasattr(self, '_cws_install_btn'):
+            is_cws = "chromewebstore.google.com/detail/" in url_str
+            ext_id = extensions.parse_webstore_id(url_str) if is_cws else None
+            if is_cws and ext_id:
+                already = ext_id in extensions.manager().extensions
+                self._cws_install_btn.setText("✔ Instalada" if already else "➕ Instalar en Minichrome")
+                self._cws_install_btn.show()
+                if "#install-minichrome-ext" in url_str:
+                    self._install_current_cws_extension()
+            else:
+                self._cws_install_btn.hide()
+
+    def _install_current_cws_extension(self):
+        v = self._cur()
+        if not v:
+            return
+        u = v.url().toString()
+        ext_id = extensions.parse_webstore_id(u)
+        if not ext_id:
+            Notif("Extensión", "No se detectó una extensión válida en esta página.", self.centralWidget())
+            return
+
+        self._cws_install_btn.setText("⏳ Descargando…")
+        self._cws_install_btn.setEnabled(False)
+        QApplication.processEvents()
+
+        def _do_install():
+            try:
+                ext = extensions.manager().install_from_webstore(u)
+                self._cws_install_btn.setText("✔ Instalada")
+                self._cws_install_btn.setEnabled(True)
+                Notif("Extensión Instalada", f"'{ext.name}' v{ext.version} se instaló correctamente en Minichrome.", self.centralWidget())
+                self._refresh_extensions()
+            except Exception as err:
+                self._cws_install_btn.setText("➕ Reintentar")
+                self._cws_install_btn.setEnabled(True)
+                Notif("Error de Instalación", f"No se pudo instalar: {err}", self.centralWidget())
+
+        QTimer.singleShot(100, _do_install)
 
     def _update_sec(self, url):
         base = "font-size:16px; background:transparent;"

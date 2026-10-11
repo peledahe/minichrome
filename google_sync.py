@@ -33,11 +33,21 @@ from PyQt6.QtGui import QDesktopServices
 import config
 from db import get_config, set_config
 
+import os
+
 KEYRING_SERVICE = "minichrome"
 CLIENT_ACCOUNT = "google-oauth-client"
 TOKEN_ACCOUNT = "google-refresh-token"
 
-SCOPES = ["openid", "email", "https://www.googleapis.com/auth/calendar"]
+DEFAULT_CLIENT_ID = os.environ.get("MINICHROME_GOOGLE_CLIENT_ID", "")
+DEFAULT_CLIENT_SECRET = os.environ.get("MINICHROME_GOOGLE_CLIENT_SECRET", "")
+
+SCOPES = [
+    "openid",
+    "email",
+    "https://www.googleapis.com/auth/calendar",
+    "https://www.googleapis.com/auth/drive.file",
+]
 AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 REVOKE_URL = "https://oauth2.googleapis.com/revoke"
@@ -141,55 +151,246 @@ def parse_client_file(path):
 
 
 # ─── Servidor local para recibir el código de autorización ───────────────────
-_DONE_PAGE = """<!doctype html><meta charset="utf-8"><title>Minichrome</title>
-<body style="font-family:sans-serif;background:#111827;color:#f3f4f6;display:grid;place-items:center;height:100vh;margin:0">
-<div style="text-align:center"><h2>{title}</h2><p>{body}</p></div></body>"""
+def _render_auth_html(success=True, title="", message="", details=""):
+    icon_color = "#34d399" if success else "#f87171"
+    icon_bg = "rgba(16, 185, 129, 0.2)" if success else "rgba(239, 68, 68, 0.2)"
+    icon_border = "rgba(16, 185, 129, 0.4)" if success else "rgba(239, 68, 68, 0.4)"
+    icon_svg = (
+        '<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>'
+        if success else
+        '<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>'
+    )
+    details_html = f'<p style="font-size:0.8rem; color:#f87171; margin-top:-14px; margin-bottom:18px;">{html.escape(details)}</p>' if details else ''
+
+    return f"""<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Minichrome - Autenticación Google</title>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700&display=swap" rel="stylesheet">
+  <style>
+    * {{ margin: 0; padding: 0; box-sizing: border-box; font-family: 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif; }}
+    body {{
+      background: #0b1120;
+      background-image: radial-gradient(at 0% 0%, rgba(99, 102, 241, 0.15) 0px, transparent 50%), radial-gradient(at 100% 100%, rgba(168, 85, 247, 0.15) 0px, transparent 50%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #f8fafc;
+      padding: 20px;
+    }}
+    .card {{
+      background: rgba(30, 41, 59, 0.7);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 20px;
+      padding: 40px 32px;
+      max-width: 440px;
+      width: 100%;
+      text-align: center;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+    }}
+    .icon-badge {{
+      width: 64px;
+      height: 64px;
+      margin: 0 auto 20px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: {icon_bg};
+      border: 1px solid {icon_border};
+      color: {icon_color};
+      box-shadow: 0 0 24px {icon_bg};
+    }}
+    h1 {{
+      font-size: 1.5rem;
+      font-weight: 700;
+      margin-bottom: 8px;
+      background: linear-gradient(to right, #ffffff, #cbd5e1);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }}
+    .tag {{
+      display: inline-block;
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      padding: 4px 10px;
+      border-radius: 9999px;
+      background: rgba(99, 102, 241, 0.2);
+      color: #818cf8;
+      margin-bottom: 16px;
+      border: 1px solid rgba(99, 102, 241, 0.3);
+    }}
+    p {{
+      color: #94a3b8;
+      font-size: 0.95rem;
+      line-height: 1.5;
+      margin-bottom: 24px;
+    }}
+    .btn {{
+      display: inline-block;
+      width: 100%;
+      padding: 12px 20px;
+      background: linear-gradient(135deg, #6366f1, #8b5cf6);
+      color: white;
+      font-weight: 600;
+      font-size: 0.9rem;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      text-decoration: none;
+      transition: all 0.2s ease;
+      box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+    }}
+    .btn:hover {{
+      opacity: 0.95;
+      transform: translateY(-1px);
+    }}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon-badge">
+      {icon_svg}
+    </div>
+    <span class="tag">Minichrome</span>
+    <h1>{html.escape(title)}</h1>
+    <p>{message}</p>
+    {details_html}
+    <button class="btn" id="close-btn" onclick="closeThisTab()">Cerrar esta pestaña</button>
+  </div>
+  <script>
+    function closeThisTab() {{
+      fetch('/close').catch(function(){{}});
+      try {{ window.close(); }} catch(e) {{}}
+    }}
+    if ({'true' if success else 'false'}) {{
+      setTimeout(function() {{
+        closeThisTab();
+      }}, 1500);
+    }}
+  </script>
+</body>
+</html>"""
 
 
 class _LoopbackServer:
     def __init__(self, state):
         self.state = state
         self.result = None
+        self.code_event = threading.Event()
         outer = self
 
         class Handler(http.server.BaseHTTPRequestHandler):
             def do_GET(h):
-                q = urllib.parse.parse_qs(urllib.parse.urlparse(h.path).query)
-                if "code" not in q and "error" not in q:
-                    h.send_response(404)
+                parsed = urllib.parse.urlparse(h.path)
+                q = urllib.parse.parse_qs(parsed.query)
+
+                if parsed.path == "/close":
+                    h.send_response(200)
+                    h.send_header("Content-Type", "text/plain")
+                    h.send_header("Connection", "close")
                     h.end_headers()
+                    try:
+                        h.wfile.write(b"OK")
+                        h.wfile.flush()
+                    except Exception:
+                        pass
+                    try:
+                        manager().close_auth_url.emit()
+                    except Exception:
+                        pass
                     return
+
+                if "code" not in q and "error" not in q:
+                    if parsed.path == "/favicon.ico":
+                        h.send_response(204)
+                        h.end_headers()
+                        return
+                    page = _render_auth_html(
+                        success=False,
+                        title="Esperando Autorización",
+                        message="Por favor autoriza los permisos en la ventana de Google…"
+                    )
+                    body_bytes = page.encode("utf-8")
+                    h.send_response(200)
+                    h.send_header("Content-Type", "text/html; charset=utf-8")
+                    h.send_header("Content-Length", str(len(body_bytes)))
+                    h.send_header("Connection", "close")
+                    h.end_headers()
+                    try:
+                        h.wfile.write(body_bytes)
+                        h.wfile.flush()
+                    except Exception:
+                        pass
+                    return
+
                 if q.get("state", [""])[0] != outer.state:
                     outer.result = ("error", "state")
                 elif "error" in q:
                     outer.result = ("error", q["error"][0])
                 else:
                     outer.result = ("code", q["code"][0])
+
                 ok = outer.result[0] == "code"
-                page = _DONE_PAGE.format(
-                    title="Minichrome conectado con Google" if ok else "No se completó la conexión",
-                    body="Ya puedes cerrar esta pestaña y volver a Minichrome." if ok
-                    else "Vuelve a Minichrome e inténtalo de nuevo.")
+                if ok:
+                    page = _render_auth_html(
+                        success=True,
+                        title="¡Conexión Exitosa!",
+                        message="Tu cuenta de Google se ha conectado correctamente a Minichrome.<br><br>Ya puedes cerrar esta pestaña y volver a la aplicación."
+                    )
+                else:
+                    page = _render_auth_html(
+                        success=False,
+                        title="Inicio Cancelado",
+                        message="No se completó la vinculación con Google.",
+                        details=outer.result[1]
+                    )
+
+                body_bytes = page.encode("utf-8")
                 h.send_response(200)
                 h.send_header("Content-Type", "text/html; charset=utf-8")
+                h.send_header("Content-Length", str(len(body_bytes)))
+                h.send_header("Connection", "close")
                 h.end_headers()
-                h.wfile.write(page.encode("utf-8"))
+                try:
+                    h.wfile.write(body_bytes)
+                    h.wfile.flush()
+                except Exception:
+                    pass
+                outer.code_event.set()
+                if ok:
+                    def _auto_close():
+                        time.sleep(1.8)
+                        try:
+                            manager().close_auth_url.emit()
+                        except Exception:
+                            pass
+                    threading.Thread(target=_auto_close, daemon=True).start()
 
             def log_message(h, *_args):
                 pass
 
-        self.httpd = http.server.HTTPServer(("127.0.0.1", 0), Handler)
-        self.httpd.timeout = 1
+        self.httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self.port = self.httpd.server_address[1]
+        self._thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
+        self._thread.start()
 
     def wait_code(self, timeout, cancel):
         end = time.time() + timeout
-        while self.result is None:
+        while not self.code_event.is_set():
             if cancel.is_set():
                 raise GoogleError("Conexión cancelada.")
             if time.time() > end:
                 raise GoogleError("Se agotó el tiempo para iniciar sesión en Google.")
-            self.httpd.handle_request()
+            self.code_event.wait(0.2)
+
         kind, value = self.result
         if kind != "code":
             if value == "access_denied":
@@ -198,7 +399,14 @@ class _LoopbackServer:
         return value
 
     def close(self):
-        self.httpd.server_close()
+        def _shutdown():
+            time.sleep(2.5)
+            try:
+                self.httpd.shutdown()
+                self.httpd.server_close()
+            except Exception:
+                pass
+        threading.Thread(target=_shutdown, daemon=True).start()
 
 
 # ─── Datos locales -> eventos de Google ──────────────────────────────────────
@@ -330,6 +538,8 @@ def _event_row(ev, cal):
 # ─── Gestor ───────────────────────────────────────────────────────────────────
 class GoogleCalendarSync(QObject):
     changed = pyqtSignal()
+    open_auth_url = pyqtSignal(str)
+    close_auth_url = pyqtSignal()
 
     def __init__(self):
         super().__init__()
@@ -342,10 +552,28 @@ class GoogleCalendarSync(QObject):
     # ── Estado ────────────────────────────────────────────────────────────────
     def _client(self):
         raw = _kr_get(CLIENT_ACCOUNT)
-        try:
-            return json.loads(raw) if raw else None
-        except ValueError:
-            return None
+        if raw:
+            try:
+                return json.loads(raw)
+            except ValueError:
+                pass
+        candidates = [
+            os.path.join(config.BASE, "google-oauth.json"),
+            "/home/perry/Desarrollo/Organizer/google-oauth.json",
+        ]
+        for path in candidates:
+            if os.path.exists(path):
+                try:
+                    cfg = parse_client_file(path)
+                    _kr_set(CLIENT_ACCOUNT, json.dumps(cfg))
+                    return cfg
+                except Exception:
+                    pass
+        if DEFAULT_CLIENT_ID and DEFAULT_CLIENT_SECRET:
+            cfg = {"client_id": DEFAULT_CLIENT_ID, "client_secret": DEFAULT_CLIENT_SECRET}
+            _kr_set(CLIENT_ACCOUNT, json.dumps(cfg))
+            return cfg
+        return None
 
     def status(self):
         client = self._client()
@@ -415,8 +643,7 @@ class GoogleCalendarSync(QObject):
         self._set(error="")
         threading.Thread(target=self._finish_connect, args=(server, cfg, verifier, redirect, self._cancel),
                          daemon=True).start()
-        # Navegador del sistema: Google bloquea el inicio de sesión en navegadores integrados.
-        QDesktopServices.openUrl(QUrl(url))
+        self.open_auth_url.emit(url)
 
     def cancel_connect(self):
         if self._cancel:
@@ -488,6 +715,12 @@ class GoogleCalendarSync(QObject):
             raise
         self._access = (r["access_token"], time.time() + int(r.get("expires_in", 3600)) - 60)
         return self._access[0]
+
+    def get_access_token(self):
+        try:
+            return self._token()
+        except Exception:
+            return None
 
     # ── Sincronización ────────────────────────────────────────────────────────
     def sync(self):

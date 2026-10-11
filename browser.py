@@ -15,13 +15,14 @@ from PyQt6.QtWebEngineCore import (
     QWebEngineUrlRequestInterceptor
 )
 from PyQt6.QtWebChannel import QWebChannel
-from PyQt6.QtCore import QUrl, Qt, QObject
+from PyQt6.QtCore import QUrl, Qt, QObject, QStandardPaths, QTimer, pyqtSignal
 from config import (CACHE, DB, SPELL_LANG, is_internal_url, load_quick_links, save_quick_links,
                     load_search_engines, save_search_engines)
 from secure_store import encrypt, decrypt
 from db import _db, get_config, save_history
 from widgets import BTN_NAV, Notif
 from bridges import AgendaBridge, PasswordBridge
+import slack_sync
 
 # ─── Perfil persistente ───────────────────────────────────────────────────────
 _prof = None
@@ -48,14 +49,46 @@ class DomainUAInterceptor(QWebEngineUrlRequestInterceptor):
             info.setHttpHeader(b"User-Agent", self._ff_ua)
 
 
+_PROFILE_NAME = "minichrome-web_cache"
+
+
+def _new_profile():
+    """Perfil persistente con los datos en CACHE (web_cache/).
+
+    No se usa setPersistentStoragePath(): cambiar la ruta después de crear el
+    perfil deja el sistema de extensiones de Chromium ligado a las
+    preferencias anteriores y setExtensionEnabled() tumba el proceso.
+    QWebEngineProfileBuilder lo evitaría, pero PyQt6 no permite instanciarlo.
+    Tampoco sirve un nombre con "../": Chromium rechaza esas rutas (LevelDB,
+    caché del service worker). Se usa la ruta por defecto de Qt para el nombre
+    del perfil, convertida en un enlace simbólico a CACHE.
+    """
+    base = os.path.join(QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppDataLocation),
+                        "QtWebEngine")
+    link = os.path.join(base, _PROFILE_NAME)
+    try:
+        os.makedirs(base, exist_ok=True)
+        if os.path.islink(link) and os.path.realpath(link) != os.path.realpath(CACHE):
+            os.unlink(link)
+        if not os.path.lexists(link):
+            os.symlink(CACHE, link)
+    except OSError as e:
+        print(f"[perfil] no se pudo enlazar {link} -> {CACHE}: {e}")
+    if os.path.realpath(link) == os.path.realpath(CACHE):
+        return QWebEngineProfile(_PROFILE_NAME)
+    # Sin enlace: los datos siguen en CACHE, pero las extensiones no se podrán activar.
+    prof = QWebEngineProfile("MinichromeProfile")
+    prof.setPersistentStoragePath(CACHE)
+    return prof
+
+
 def profile():
     global _prof, _ua_interceptor
     if not _prof:
-        _prof = QWebEngineProfile("MinichromeProfile")
+        _prof = _new_profile()
         # UA real del motor sin la marca "QtWebEngine/x.y.z", que algunos sitios
         # bloquean; así coincide con la versión de Chrome que realmente corre.
         _prof.setHttpUserAgent(re.sub(r"\s*QtWebEngine/\S+", "", _prof.httpUserAgent()))
-        _prof.setPersistentStoragePath(CACHE)
         _prof.setCachePath(os.path.join(CACHE, "httpcache"))
         _prof.setHttpCacheType(QWebEngineProfile.HttpCacheType.DiskHttpCache)
         _prof.setPersistentCookiesPolicy(QWebEngineProfile.PersistentCookiesPolicy.ForcePersistentCookies)
@@ -73,7 +106,7 @@ def profile():
             (function(){
                 var st = document.createElement('style');
                 st.id = 'minichrome-scrollbar-style';
-                st.innerHTML = `
+                st.textContent = `
                     ::-webkit-scrollbar { width: 8px !important; height: 8px !important; }
                     ::-webkit-scrollbar-track { background: transparent !important; }
                     ::-webkit-scrollbar-thumb { background: rgba(128, 128, 128, 0.2) !important; border-radius: 10px !important; }
@@ -90,6 +123,101 @@ def profile():
         s.setRunsOnSubFrames(True)
         s.setWorldId(QWebEngineScript.ScriptWorldId.ApplicationWorld)
         _prof.scripts().insert(s)
+
+        # ── Script de Integración con Chrome Web Store ────────────────────────
+        cws_script = QWebEngineScript()
+        cws_script.setName("cws_helper")
+        cws_script.setSourceCode("""
+        (function(){
+            if (location.hostname !== 'chromewebstore.google.com') return;
+
+            var style = document.createElement('style');
+            style.textContent = `
+                .minichrome-cws-btn {
+                    background: linear-gradient(135deg, #2563eb, #7c3aed) !important;
+                    color: white !important;
+                    border: 1px solid rgba(255,255,255,0.4) !important;
+                    border-radius: 24px !important;
+                    padding: 8px 24px !important;
+                    font-weight: 700 !important;
+                    font-size: 13px !important;
+                    cursor: pointer !important;
+                    display: inline-flex !important;
+                    align-items: center !important;
+                    gap: 6px !important;
+                    box-shadow: 0 4px 14px rgba(124,58,237,0.4) !important;
+                    transition: transform 0.15s, filter 0.15s !important;
+                }
+                .minichrome-cws-btn:hover {
+                    filter: brightness(1.1) !important;
+                    transform: scale(1.02) !important;
+                }
+            `;
+            (document.head || document.documentElement).appendChild(style);
+
+            // Aviso "no disponible" (la tienda no reconoce Minichrome como Chrome).
+            // Se oculta solo el bloque pequeño que lo contiene, nunca un ancestro
+            // con el resto de la página.
+            var UNAVAILABLE = /(elemento no (está )?disponible|item (is )?(currently )?unavailable|no disponible actualmente)/i;
+            var MAX_BANNER_TEXT = 400;
+
+            function hideUnavailable() {
+                var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+                var node;
+                while ((node = walker.nextNode())) {
+                    if (!UNAVAILABLE.test(node.nodeValue || '')) continue;
+                    var el = node.parentElement, box = null;
+                    while (el && el !== document.body && el.tagName !== 'MAIN'
+                           && (el.textContent || '').length <= MAX_BANNER_TEXT) {
+                        box = el;
+                        el = el.parentElement;
+                    }
+                    if (box && !box.dataset.mcHidden) {
+                        box.dataset.mcHidden = '1';
+                        box.style.display = 'none';
+                    }
+                }
+            }
+
+            function fixButtons() {
+                document.querySelectorAll('button:not(.minichrome-cws-btn)').forEach(function(btn) {
+                    var txt = (btn.textContent || '').trim();
+                    if (txt.includes('Agregar a Chrome') || txt.includes('Añadir a Chrome') || txt.includes('Add to Chrome')
+                        || txt.includes('Disponible en Chrome') || txt.includes('No compatible')) {
+                        btn.removeAttribute('disabled');
+                        btn.style.opacity = '1';
+                        btn.style.cursor = 'pointer';
+                        btn.style.pointerEvents = 'auto';
+                        // La tienda exige Trusted Types: innerHTML lanzaría un error.
+                        btn.textContent = '➕ Instalar en Minichrome';
+                        btn.classList.add('minichrome-cws-btn');
+                        btn.onclick = function(e) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            window.location.hash = '#install-minichrome-ext=' + Date.now();
+                        };
+                    }
+                });
+            }
+
+            // La tienda es una SPA: se revisa al cambiar el DOM (agrupado por frame).
+            var queued = false;
+            function fixCWS() {
+                queued = false;
+                if (!document.body) return;
+                hideUnavailable();
+                fixButtons();
+            }
+            new MutationObserver(function() {
+                if (!queued) { queued = true; requestAnimationFrame(fixCWS); }
+            }).observe(document.documentElement, {childList: true, subtree: true, characterData: true});
+            fixCWS();
+        })();
+        """)
+        cws_script.setInjectionPoint(QWebEngineScript.InjectionPoint.DocumentReady)
+        cws_script.setRunsOnSubFrames(True)
+        cws_script.setWorldId(QWebEngineScript.ScriptWorldId.MainWorld)
+        _prof.scripts().insert(cws_script)
 
         # ── Script de Captura de Contraseñas ──────────────────────────────────
         pwd_capture = QWebEngineScript()
@@ -459,13 +587,30 @@ class WebPage(QWebEnginePage):
         if self.settings().testAttribute(attr) != internal:
             self.settings().setAttribute(attr, internal)
 
+    def _sync_clipboard_access(self, url):
+        """Las páginas de extensiones (chrome-extension://) pueden usar
+        navigator.clipboard, como en Chrome; los sitios web no."""
+        attr = QWebEngineSettings.WebAttribute.JavascriptCanAccessClipboard
+        is_ext = url.scheme() == "chrome-extension"
+        if self.settings().testAttribute(attr) != is_ext:
+            self.settings().setAttribute(attr, is_ext)
+
     def acceptNavigationRequest(self, url, nav_type, is_main_frame):
+        # Regreso de la autorización de Slack: se toma el código aquí y la
+        # dirección (https://localhost/…) nunca llega a cargarse.
+        if is_main_frame and url.toString().startswith(slack_sync.REDIRECT_URI):
+            slack_sync.client().handle_redirect(url.toString())
+            view = self.parent()
+            if hasattr(view, "closeRequested"):
+                QTimer.singleShot(0, view.closeRequested.emit)
+            return False
         # Retira los bridges antes de salir hacia un sitio externo; el registro
         # solo ocurre al confirmarse la URL interna (urlChanged), cuando el
         # documento externo anterior ya no existe.
         if is_main_frame:
             self._sync_bridges(url, allow_register=False)
             self._sync_remote_access(url)
+            self._sync_clipboard_access(url)
         return super().acceptNavigationRequest(url, nav_type, is_main_frame)
 
     def _normalized_host(self, value: str) -> str:
@@ -848,9 +993,15 @@ class WebPage(QWebEnginePage):
 
 # ─── WebView ──────────────────────────────────────────────────────────────────
 class WebView(QWebEngineView):
-    def __init__(self, main_win, url=""):
+    closeRequested = pyqtSignal()
+
+    def __init__(self, main_win, url="", record_history=True):
         super().__init__()
         self.main_win = main_win
+        self._record_history = record_history
+        # Opcional: callable(permission) -> True (conceder), False (denegar) o
+        # None (preguntar como siempre). Lo usa el panel de extensiones.
+        self.permission_policy = None
         self._was_maximized_before_web_fullscreen = False
         page = WebPage(profile(), self)
         self.setPage(page)
@@ -863,6 +1014,7 @@ class WebView(QWebEngineView):
         self._pw_bridge = PasswordBridge(self)
         page.set_internal_bridges(self._channel, {"py": self._bridge, "pw": self._pw_bridge})
 
+        page.windowCloseRequested.connect(self.closeRequested)
         page.geometryChangeRequested.connect(self._ignore_geom)
         page.fullScreenRequested.connect(self._handle_fullscreen_request)
 
@@ -916,7 +1068,7 @@ class WebView(QWebEngineView):
                 if engines is not None:
                     js = f"window._miniEngines = {json.dumps(engines)}; if (typeof renderEngines === 'function') renderEngines();"
                     self.page().runJavaScript(js)
-        else:
+        elif self._record_history:
             save_history(self.title(), url)
 
     def createWindow(self, _type):
@@ -930,4 +1082,10 @@ class WebView(QWebEngineView):
         # Las páginas internas conservan el comportamiento previo (sin diálogo).
         if is_internal_url(self.url()):
             return
-        bf.ask_permission(self, permission)
+        decision = self.permission_policy(permission) if self.permission_policy else None
+        if decision is True:
+            permission.grant()
+        elif decision is False:
+            permission.deny()
+        else:
+            bf.ask_permission(self, permission)

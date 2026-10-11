@@ -21,6 +21,7 @@ const state = {
     kbActiveLabel: null,
     notes: [],
     passwords: [],
+    capturedCredIndexToSave: null,
     exchangeRate: 7.8,
     paymentMethods: ['Efectivo', 'Tarjeta', 'Transferencia'],
     page: {
@@ -28,14 +29,21 @@ const state = {
         shopping: 1,
         income: 1
     },
+    agendaView: 'list',
+    calShowKanban: false,
+    calShowCalendar: true,
+    kanbanCards: [],
+    calendarDate: new Date(),
     cfg: {
         videoEnabled: true,
         imagesEnabled: true,
-        shoppingEnabled: true,
-        incomeEnabled: true,
+        budgetEnabled: true,
+        debtsEnabled: true,
         kanbanEnabled: true,
         notesEnabled: true,
         arcadeEnabled: true,
+        agendaEnabled: true,
+        passwordsEnabled: true,
         homeUrl: '',
         mediaPath: '',
         videoStartMuted: false,
@@ -58,6 +66,8 @@ const state = {
     pwAutoSavePolicy: 'ask',
     kbModalStatus: 'pending'
 };
+
+window.state = state;
 
 const DB_LARAVEL_TEMPLATE = {
     site: 'Fundascout DB (Laravel)',
@@ -82,12 +92,18 @@ DB_PASSWORD=password`
 const DB_NOTE_KEYS = ['DB_CONNECTION', 'DB_PORT', 'DB_DATABASE'];
 
 const MODULE_META = {
-    shopping: { cfgKey: 'shoppingEnabled', tab: 'shopping' },
-    income: { cfgKey: 'incomeEnabled', tab: 'income' },
+    agenda: { cfgKey: 'agendaEnabled', tab: 'agenda' },
+    budget: { cfgKey: 'budgetEnabled', tab: 'budget' },
+    savings: { cfgKey: 'savingsEnabled', tab: 'savings' },
+    debts: { cfgKey: 'debtsEnabled', tab: 'debts' },
     kanban: { cfgKey: 'kanbanEnabled', tab: 'kanban' },
-    notes: { cfgKey: 'notesEnabled', tab: 'notes' }
+    notes: { cfgKey: 'notesEnabled', tab: 'notes' },
+    passwords: { cfgKey: 'passwordsEnabled', tab: 'passwords' }
 };
 
+// Extensión Chrome: usar el bridge local en lugar de QWebChannel
+// storage_bridge.js ya define window.QWebChannel que llama al callback
+// con los objetos py y pw desde chrome.storage.local
 new QWebChannel(qt.webChannelTransport, (channel) => {
     window.py = channel.objects.py;
     window.pw = channel.objects.pw;
@@ -103,8 +119,20 @@ async function initApp() {
 
     await loadAppConfig();
 
+    if (window.initGDriveSync) window.initGDriveSync();
+
+    const preferredView = localStorage.getItem('lastAgendaView') || 'list';
+    switchAgendaView(preferredView);
+
     const preferredTab = localStorage.getItem('lastAgendaTab') || 'notes';
     activateTab(preferredTab);
+
+    // Ajustar número de tareas visibles en el calendario al redimensionar la pantalla
+    window.addEventListener('resize', () => {
+        if (state.agendaView === 'calendar' && document.getElementById('view-agenda').classList.contains('active')) {
+            renderCalendar();
+        }
+    });
 }
 
 function bindStaticEvents() {
@@ -115,7 +143,30 @@ function bindStaticEvents() {
     const cfgBtn = document.getElementById('btn-config');
     if (cfgBtn) cfgBtn.onclick = () => activateTab('config');
 
+    const aboutBtn = document.getElementById('btn-about');
+    const aboutModal = document.getElementById('organizer-about-modal');
+    const aboutCloseBtn = document.getElementById('organizer-about-close-btn');
+    if (aboutBtn && aboutModal) {
+        aboutBtn.onclick = () => aboutModal.style.display='flex';
+    }
+    if (aboutCloseBtn && aboutModal) {
+        aboutCloseBtn.onclick = () => aboutModal.style.display='none';
+    }
+    if (aboutModal) {
+        aboutModal.addEventListener('click', (e) => {
+            if (e.target === aboutModal) aboutModal.style.display = 'none';
+        });
+    }
+    const aboutLink = document.getElementById('organizer-about-modal-link');
+    if (aboutLink) {
+        aboutLink.onclick = (e) => {
+            e.preventDefault();
+            window.open('https://ext.merke.net', '_blank');
+        };
+    }
+
     const openNewModalBtn = document.getElementById('open-new-reminder-modal-btn');
+    const agendaClearDoneBtn = document.getElementById('agenda-clear-done-btn');
     const newModal = document.getElementById('new-reminder-modal');
     if (openNewModalBtn && newModal) {
         openNewModalBtn.onclick = () => {
@@ -128,6 +179,9 @@ function bindStaticEvents() {
             renderNewReminderTagHelper();
             newModal.classList.add('active');
         };
+    }
+    if (agendaClearDoneBtn) {
+        agendaClearDoneBtn.onclick = clearDoneAgendaReminders;
     }
 
     const cancelNewModalBtn = document.getElementById('new-reminder-cancel-btn');
@@ -149,8 +203,78 @@ function bindStaticEvents() {
         reminderTagFilter.addEventListener('change', (e) => {
             state.reminderTagFilter = e.target.value || REMINDER_TAG_ALL;
             state.page.reminders = 1;
-            renderReminders();
+            if (state.agendaView === 'calendar') {
+                renderCalendar();
+            } else {
+                renderReminders();
+            }
         });
+    }
+
+    // Bindings de la vista de Calendario en Agenda
+    const btnListView = document.getElementById('btn-agenda-list-view');
+    const btnCalView = document.getElementById('btn-agenda-cal-view');
+    if (btnListView) btnListView.onclick = () => switchAgendaView('list');
+    if (btnCalView) btnCalView.onclick = () => switchAgendaView('calendar');
+
+    const calShowKanbanCheckbox = document.getElementById('cal-show-kanban-checkbox');
+    if (calShowKanbanCheckbox) {
+        const preferredShow = localStorage.getItem('lastCalShowKanban') === 'true';
+        calShowKanbanCheckbox.checked = preferredShow;
+        state.calShowKanban = preferredShow;
+        calShowKanbanCheckbox.onchange = (e) => {
+            state.calShowKanban = e.target.checked;
+            localStorage.setItem('lastCalShowKanban', e.target.checked);
+            renderCalendar();
+        };
+    }
+
+    const calShowCalendarCheckbox = document.getElementById('cal-show-calendar-checkbox');
+    if (calShowCalendarCheckbox) {
+        const lastVal = localStorage.getItem('lastCalShowCalendar');
+        const preferredShow = lastVal === null ? true : lastVal === 'true';
+        calShowCalendarCheckbox.checked = preferredShow;
+        state.calShowCalendar = preferredShow;
+        calShowCalendarCheckbox.onchange = (e) => {
+            state.calShowCalendar = e.target.checked;
+            localStorage.setItem('lastCalShowCalendar', e.target.checked);
+            renderCalendar();
+        };
+    }
+
+    const calPrevBtn = document.getElementById('cal-prev-btn');
+    const calNextBtn = document.getElementById('cal-next-btn');
+    const calTodayBtn = document.getElementById('cal-today-btn');
+    if (calPrevBtn) calPrevBtn.onclick = () => navigateCalendar('prev');
+    if (calNextBtn) calNextBtn.onclick = () => navigateCalendar('next');
+    if (calTodayBtn) calTodayBtn.onclick = () => navigateCalendar('today');
+
+    const calMonthSelect = document.getElementById('cal-month-select');
+    const calYearSelect = document.getElementById('cal-year-select');
+    if (calMonthSelect) {
+        calMonthSelect.onchange = (e) => navigateCalendar('month', e.target.value);
+    }
+    if (calYearSelect) {
+        calYearSelect.onchange = (e) => navigateCalendar('year', e.target.value);
+    }
+
+    const calDayModalCloseBtn = document.getElementById('cal-day-modal-close-btn');
+    const calDayModal = document.getElementById('calendar-day-details-modal');
+    if (calDayModalCloseBtn && calDayModal) {
+        calDayModalCloseBtn.onclick = () => calDayModal.classList.remove('active');
+    }
+
+    const gcalEventModalCloseBtn = document.getElementById('gcal-event-close-btn');
+    const gcalEventModal = document.getElementById('gcal-event-modal');
+    if (gcalEventModalCloseBtn && gcalEventModal) {
+        gcalEventModalCloseBtn.onclick = () => gcalEventModal.classList.remove('active');
+    }
+    if (gcalEventModal) {
+        gcalEventModal.onclick = (e) => {
+            if (e.target === gcalEventModal) {
+                gcalEventModal.classList.remove('active');
+            }
+        };
     }
 
     const addShopBtn = document.getElementById('add-shop-btn');
@@ -210,6 +334,16 @@ function bindStaticEvents() {
     bindPaymentMethodsEvents();
     bindKanbanEvents();
     bindPasswordEvents();
+
+    // Toggles de estado de presupuesto (proyectado/confirmado)
+    document.querySelectorAll('#shop-status-toggle .status-btn, #income-status-toggle .status-btn').forEach(btn => {
+        btn.onclick = (e) => {
+            e.preventDefault();
+            const parent = btn.parentElement;
+            parent.querySelectorAll('.status-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+        };
+    });
 
     window.onclick = (e) => {
         if (e.target.classList.contains('edit-modal-overlay') || e.target.classList.contains('pm-modal-overlay') || e.target.classList.contains('kb-modal-overlay') || e.target.classList.contains('pw-modal-overlay')) {
@@ -374,24 +508,16 @@ function renderEditReminderTagHelper() {
     });
 }
 
-const CFG_TOGGLE_KEYS = {
-    'cfg-video-enabled': 'videoEnabled',
-    'cfg-images-enabled': 'imagesEnabled',
-    'cfg-shopping-enabled': 'shoppingEnabled',
-    'cfg-income-enabled': 'incomeEnabled',
-    'cfg-kanban-enabled': 'kanbanEnabled',
-    'cfg-notes-enabled': 'notesEnabled',
-    'cfg-arcade-enabled': 'arcadeEnabled'
-};
-
 function bindConfigEvents() {
     const cfgToggleIds = [
+        'cfg-agenda-enabled',
         'cfg-video-enabled',
         'cfg-images-enabled',
         'cfg-shopping-enabled',
         'cfg-income-enabled',
         'cfg-kanban-enabled',
         'cfg-notes-enabled',
+        'cfg-passwords-enabled',
         'cfg-arcade-enabled'
     ];
 
@@ -401,9 +527,6 @@ function bindConfigEvents() {
         el.addEventListener('change', () => {
             syncCfgFromInputs();
             applyModuleFilters();
-            // Se guarda al instante: la página de inicio muestra u oculta el acceso sin pulsar "Guardar".
-            const key = CFG_TOGGLE_KEYS[id];
-            if (key) py.set_config(key, state.cfg[key] ? '1' : '0');
         });
     });
 
@@ -454,6 +577,8 @@ function bindPaymentMethodsEvents() {
     const newInput = document.getElementById('pm-new-method-input');
 
     if (openBtn) openBtn.addEventListener('click', openPmModal);
+    const openBtnBudget = document.getElementById('btn-payment-methods-budget');
+    if (openBtnBudget) openBtnBudget.addEventListener('click', openPmModal);
     if (cancelBtn) cancelBtn.addEventListener('click', () => pmModal?.classList.remove('active'));
     if (saveBtn) saveBtn.addEventListener('click', savePmModal);
     if (addBtn) addBtn.addEventListener('click', addPmDraft);
@@ -474,12 +599,67 @@ function bindKanbanEvents() {
         });
     }
 
+    const kbCleanDoneBtn = document.getElementById('kb-clean-done-btn');
+    if (kbCleanDoneBtn) {
+        kbCleanDoneBtn.onclick = clearDoneKanbanCards;
+    }
+
     document.querySelectorAll('.kb-col-add').forEach((btn) => {
         btn.onclick = () => {
             const status = btn.dataset.status || 'pending';
             openKanbanModal(status);
         };
     });
+
+    document.querySelectorAll('.kb-col-toggle-collapse').forEach((btn) => {
+        btn.onclick = () => {
+            const status = btn.dataset.status || 'pending';
+            const col = document.getElementById(`col-${status}`);
+            if (col) {
+                const isCollapsed = col.classList.contains('collapsed');
+                col.classList.toggle('collapsed', !isCollapsed);
+                btn.dataset.collapsed = String(!isCollapsed);
+                localStorage.setItem(`kb-col-collapsed-${status}`, String(!isCollapsed));
+            }
+        };
+    });
+
+    // Restaurar estado de colapso de columnas
+    ['pending', 'inprogress', 'blocked', 'done'].forEach((status) => {
+        const isCollapsed = localStorage.getItem(`kb-col-collapsed-${status}`) === 'true';
+        const col = document.getElementById(`col-${status}`);
+        const btn = document.querySelector(`.kb-col-toggle-collapse[data-status="${status}"]`);
+        if (col && isCollapsed) {
+            col.classList.add('collapsed');
+            if (btn) btn.dataset.collapsed = 'true';
+        }
+    });
+
+    // Debug Button para ordenamiento de Kanban
+    const debugBtn = document.getElementById('kb-debug-btn');
+    if (debugBtn) {
+        const isDebugEnabled = localStorage.getItem('kb_debug_sort') === 'true';
+        debugBtn.textContent = isDebugEnabled ? '🐛 Debug ON' : '🐛 Debug OFF';
+        debugBtn.style.opacity = isDebugEnabled ? '1' : '0.5';
+
+        debugBtn.onclick = () => {
+            const currentState = localStorage.getItem('kb_debug_sort') === 'true';
+            const newState = !currentState;
+            localStorage.setItem('kb_debug_sort', String(newState));
+            debugBtn.textContent = newState ? '🐛 Debug ON' : '🐛 Debug OFF';
+            debugBtn.style.opacity = newState ? '1' : '0.5';
+            notify(newState ? '✅ Debug ACTIVADO - Abre DevTools (F12) para ver logs' : '❌ Debug desactivado', 'info');
+            fetchKanban(); // Recargar para ver logs inmediatamente
+        };
+    }
+
+    // Auto-fix Button para asignar prioridades automáticamente
+    const autoFixBtn = document.getElementById('kb-auto-fix-btn');
+    if (autoFixBtn) {
+        autoFixBtn.onclick = async () => {
+            await autoFixKanbanPriorities();
+        };
+    }
 
     const kbCancelBtn = document.getElementById('kb-modal-cancel');
     const kbSaveBtn = document.getElementById('kb-modal-save');
@@ -511,18 +691,6 @@ function bindKanbanEvents() {
             e.preventDefault();
         });
     });
-
-    const boldBtn = document.getElementById('kb-tool-bold');
-    const italicBtn = document.getElementById('kb-tool-italic');
-    const codeBtn = document.getElementById('kb-tool-code');
-    const linkBtn = document.getElementById('kb-link-tool-btn');
-    const listBtn = document.getElementById('kb-tool-list');
-
-    if (boldBtn) boldBtn.addEventListener('click', () => kbApplyFormat('bold'));
-    if (italicBtn) italicBtn.addEventListener('click', () => kbApplyFormat('italic'));
-    if (codeBtn) codeBtn.addEventListener('click', () => kbApplyFormat('code'));
-    if (linkBtn) linkBtn.addEventListener('click', () => kbApplyFormat('link'));
-    if (listBtn) listBtn.addEventListener('click', () => kbApplyFormat('list'));
 
     if (kbLinkInsertBtn) kbLinkInsertBtn.onclick = kbInsertLinkFromPopover;
     if (kbLinkCancelBtn) kbLinkCancelBtn.onclick = kbCloseLinkPopover;
@@ -781,14 +949,7 @@ function toBool(v, fallback = true) {
     return v === '1' || v === 'true' || v === true;
 }
 
-function escapeHtml(str) {
-    return String(str)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
-}
+
 
 function fmtNum(n) {
     return Number(n || 0).toLocaleString('en-US', {
@@ -806,17 +967,7 @@ function pmBadgeClass(method) {
     return 'pm-badge-default';
 }
 
-function parseJSON(value, fallback) {
-    try {
-        return JSON.parse(value);
-    } catch (_err) {
-        return fallback;
-    }
-}
 
-function jsonStr(obj) {
-    return JSON.stringify(obj).replace(/'/g, '&#39;');
-}
 
 function updateConfigHighlight(tabName) {
     const cfgBtn = document.getElementById('btn-config');
@@ -824,19 +975,33 @@ function updateConfigHighlight(tabName) {
 }
 
 function getTabFromCfgKey(cfgKey) {
-    if (cfgKey === 'shoppingEnabled') return 'shopping';
-    if (cfgKey === 'incomeEnabled') return 'income';
+    if (cfgKey === 'budgetEnabled') return 'budget';
+    if (cfgKey === 'debtsEnabled') return 'debts';
     if (cfgKey === 'kanbanEnabled') return 'kanban';
     if (cfgKey === 'notesEnabled') return 'notes';
     return '';
 }
 
 function isTabVisible(tabName) {
-    if (tabName === 'shopping') return state.cfg.shoppingEnabled;
-    if (tabName === 'income') return state.cfg.incomeEnabled;
+    if (tabName === 'agenda') return state.cfg.agendaEnabled !== false;
+    if (tabName === 'budget') return state.cfg.budgetEnabled !== false;
+    if (tabName === 'savings') return state.cfg.savingsEnabled !== false;
+    if (tabName === 'debts') return state.cfg.debtsEnabled !== false;
     if (tabName === 'kanban') return state.cfg.kanbanEnabled;
     if (tabName === 'notes') return state.cfg.notesEnabled;
+    if (tabName === 'passwords') return state.cfg.passwordsEnabled !== false;
     return true;
+}
+
+function getFirstVisibleTab() {
+    if (isTabVisible('notes')) return 'notes';
+    if (isTabVisible('budget')) return 'budget';
+    if (isTabVisible('savings')) return 'savings';
+    if (isTabVisible('debts')) return 'debts';
+    if (isTabVisible('agenda')) return 'agenda';
+    if (isTabVisible('kanban')) return 'kanban';
+    if (isTabVisible('passwords')) return 'passwords';
+    return 'notes';
 }
 
 function applyModuleFilters() {
@@ -849,27 +1014,33 @@ function applyModuleFilters() {
     localStorage.setItem('deskio_app_settings', JSON.stringify({
         videoEnabled: state.cfg.videoEnabled,
         imagesEnabled: state.cfg.imagesEnabled,
-        shoppingEnabled: state.cfg.shoppingEnabled,
-        incomeEnabled: state.cfg.incomeEnabled,
+        budgetEnabled: state.cfg.budgetEnabled,
+        savingsEnabled: state.cfg.savingsEnabled,
+        debtsEnabled: state.cfg.debtsEnabled,
         kanbanEnabled: state.cfg.kanbanEnabled,
         notesEnabled: state.cfg.notesEnabled,
         arcadeEnabled: state.cfg.arcadeEnabled,
+        agendaEnabled: state.cfg.agendaEnabled,
+        passwordsEnabled: state.cfg.passwordsEnabled,
         homeUrl: state.cfg.homeUrl
     }));
 
     const activeTab = document.querySelector('.ag-tab.active')?.dataset.tab;
     if (activeTab && !isTabVisible(activeTab)) {
-        activateTab('agenda');
+        activateTab(getFirstVisibleTab());
     }
 }
 
 function syncCfgFromInputs() {
+    state.cfg.agendaEnabled = document.getElementById('cfg-agenda-enabled')?.checked !== false;
     state.cfg.videoEnabled = !!document.getElementById('cfg-video-enabled')?.checked;
     state.cfg.imagesEnabled = !!document.getElementById('cfg-images-enabled')?.checked;
-    state.cfg.shoppingEnabled = !!document.getElementById('cfg-shopping-enabled')?.checked;
-    state.cfg.incomeEnabled = !!document.getElementById('cfg-income-enabled')?.checked;
+    state.cfg.budgetEnabled = !!document.getElementById('cfg-budget-enabled')?.checked;
+    state.cfg.savingsEnabled = !!document.getElementById('cfg-savings-enabled')?.checked;
+    state.cfg.debtsEnabled = !!document.getElementById('cfg-debts-enabled')?.checked;
     state.cfg.kanbanEnabled = !!document.getElementById('cfg-kanban-enabled')?.checked;
     state.cfg.notesEnabled = !!document.getElementById('cfg-notes-enabled')?.checked;
+    state.cfg.passwordsEnabled = document.getElementById('cfg-passwords-enabled')?.checked !== false;
     state.cfg.arcadeEnabled = !!document.getElementById('cfg-arcade-enabled')?.checked;
 
     state.cfg.homeUrl = (document.getElementById('cfg-home-url')?.value || '').trim();
@@ -887,8 +1058,8 @@ async function loadAppConfig() {
         const [
             videoEnabled,
             imagesEnabled,
-            shoppingEnabled,
-            incomeEnabled,
+            budgetEnabled,
+            debtsEnabled,
             kanbanEnabled,
             notesEnabled,
             arcadeEnabled,
@@ -900,12 +1071,15 @@ async function loadAppConfig() {
             paymentMethods,
             imageSettingsRaw,
             mediaPathResolved,
-            screenshotsPath
+            screenshotsPath,
+            agendaEnabled,
+            passwordsEnabled,
+            savingsEnabled
         ] = await Promise.all([
             py.get_config('videoEnabled'),
             py.get_config('imagesEnabled'),
-            py.get_config('shoppingEnabled'),
-            py.get_config('incomeEnabled'),
+            py.get_config('budgetEnabled'),
+            py.get_config('debtsEnabled'),
             py.get_config('kanbanEnabled'),
             py.get_config('notesEnabled'),
             py.get_config('arcadeEnabled'),
@@ -917,16 +1091,22 @@ async function loadAppConfig() {
             py.get_config('paymentMethods'),
             py.get_image_settings(),
             py.get_media_path(),
-            py.get_config('screenshotsPath')
+            py.get_config('screenshotsPath'),
+            py.get_config('agendaEnabled'),
+            py.get_config('passwordsEnabled'),
+            py.get_config('savingsEnabled')
         ]);
 
         state.cfg.videoEnabled = toBool(videoEnabled, true);
         state.cfg.imagesEnabled = toBool(imagesEnabled, true);
-        state.cfg.shoppingEnabled = toBool(shoppingEnabled, true);
-        state.cfg.incomeEnabled = toBool(incomeEnabled, true);
+        state.cfg.budgetEnabled = toBool(budgetEnabled, true);
+        state.cfg.savingsEnabled = toBool(savingsEnabled, true);
+        state.cfg.debtsEnabled = toBool(debtsEnabled, true);
         state.cfg.kanbanEnabled = toBool(kanbanEnabled, true);
         state.cfg.notesEnabled = toBool(notesEnabled, true);
         state.cfg.arcadeEnabled = toBool(arcadeEnabled, true);
+        state.cfg.agendaEnabled = toBool(agendaEnabled, true);
+        state.cfg.passwordsEnabled = toBool(passwordsEnabled, true);
 
         state.cfg.homeUrl = homeUrl || '';
         state.cfg.mediaPath = mediaPath || mediaPathResolved || '';
@@ -962,12 +1142,15 @@ function fillConfigInputs() {
         if (el) el.checked = !!value;
     };
 
+    setChecked('cfg-agenda-enabled', state.cfg.agendaEnabled !== false);
     setChecked('cfg-video-enabled', state.cfg.videoEnabled);
     setChecked('cfg-images-enabled', state.cfg.imagesEnabled);
-    setChecked('cfg-shopping-enabled', state.cfg.shoppingEnabled);
-    setChecked('cfg-income-enabled', state.cfg.incomeEnabled);
+    setChecked('cfg-budget-enabled', state.cfg.budgetEnabled);
+    setChecked('cfg-savings-enabled', state.cfg.savingsEnabled);
+    setChecked('cfg-debts-enabled', state.cfg.debtsEnabled);
     setChecked('cfg-kanban-enabled', state.cfg.kanbanEnabled);
     setChecked('cfg-notes-enabled', state.cfg.notesEnabled);
+    setChecked('cfg-passwords-enabled', state.cfg.passwordsEnabled !== false);
     setChecked('cfg-arcade-enabled', state.cfg.arcadeEnabled);
 
     const cfgHomeUrl = document.getElementById('cfg-home-url');
@@ -988,6 +1171,9 @@ function fillConfigInputs() {
 
     const pmExchangeRate = document.getElementById('pm-exchange-rate');
     if (pmExchangeRate) pmExchangeRate.value = String(state.exchangeRate);
+
+    if (typeof window.updateSyncUI === 'function') window.updateSyncUI();
+    if (typeof window.updateGCalUI === 'function') window.updateGCalUI();
 }
 
 async function saveAppConfig() {
@@ -997,11 +1183,14 @@ async function saveAppConfig() {
         const writes = [
             py.set_config('videoEnabled', state.cfg.videoEnabled ? '1' : '0'),
             py.set_config('imagesEnabled', state.cfg.imagesEnabled ? '1' : '0'),
-            py.set_config('shoppingEnabled', state.cfg.shoppingEnabled ? '1' : '0'),
-            py.set_config('incomeEnabled', state.cfg.incomeEnabled ? '1' : '0'),
+            py.set_config('budgetEnabled', state.cfg.budgetEnabled ? '1' : '0'),
+            py.set_config('savingsEnabled', state.cfg.savingsEnabled ? '1' : '0'),
+            py.set_config('debtsEnabled', state.cfg.debtsEnabled ? '1' : '0'),
             py.set_config('kanbanEnabled', state.cfg.kanbanEnabled ? '1' : '0'),
             py.set_config('notesEnabled', state.cfg.notesEnabled ? '1' : '0'),
             py.set_config('arcadeEnabled', state.cfg.arcadeEnabled ? '1' : '0'),
+            py.set_config('agendaEnabled', state.cfg.agendaEnabled ? '1' : '0'),
+            py.set_config('passwordsEnabled', state.cfg.passwordsEnabled ? '1' : '0'),
             py.set_config('homeUrl', state.cfg.homeUrl),
             py.set_config('mediaPath', state.cfg.mediaPath),
             py.set_config('videoStartMuted', state.cfg.videoStartMuted ? '1' : '0'),
@@ -1078,7 +1267,12 @@ function renderCfgFolderBrowser(data) {
         row.className = 'cfg-folder-item';
         row.innerHTML = `<span>📁</span><span>${escapeHtml(name)}</span>`;
         row.onclick = async () => {
-            const nextPath = `${state.cfgBrowsingPath.replace(/\/+$/, '')}/${name}`;
+            const isWindows = state.cfgBrowsingPath.includes('\\');
+            const sep = isWindows ? '\\' : '/';
+            const cleanPath = isWindows 
+                ? state.cfgBrowsingPath.replace(/[\\/]+$/, '')
+                : state.cfgBrowsingPath.replace(/\/+$/, '');
+            const nextPath = `${cleanPath}${sep}${name}`;
             const raw = state.cfgBrowseMode === 'image'
                 ? await py.browse_local_path(nextPath)
                 : await py.browse_folders(nextPath);
@@ -1105,6 +1299,7 @@ function openEditModal(mode, item) {
     const tagHelper = document.getElementById('edit-tag-helper');
     const valRow = document.getElementById('edit-value-row');
     const pmRow = document.getElementById('edit-payment-method-row');
+    const catRow = document.getElementById('edit-category-row');
 
     if (title) {
         if (mode === 'reminder') title.textContent = 'Editar tarea';
@@ -1121,15 +1316,28 @@ function openEditModal(mode, item) {
         if (tagHelper) tagHelper.style.display = 'flex';
         if (valRow) valRow.style.display = 'none';
         if (pmRow) pmRow.style.display = 'none';
+        if (catRow) catRow.style.display = 'none';
         renderEditReminderTagHelper();
     } else {
         if (tagRow) tagRow.style.display = 'none';
         if (tagHelper) tagHelper.style.display = 'none';
         if (valRow) valRow.style.display = 'flex';
+        if (catRow) {
+            catRow.style.display = 'flex';
+            const catSelect = document.getElementById('edit-category');
+            if (catSelect && window.BUDGET_CATEGORIES) {
+                const cats = mode === 'shopping' ? window.BUDGET_CATEGORIES.expense : window.BUDGET_CATEGORIES.income;
+                catSelect.innerHTML = cats.map(c => `<option value="${c}">${c}</option>`).join('');
+                catSelect.value = item.category || (mode === 'shopping' ? 'Otros' : 'Salario');
+            }
+        }
         const editValue = document.getElementById('edit-value');
         const editCurrency = document.getElementById('edit-currency');
         if (editValue) editValue.value = item.value || '';
-        if (editCurrency) editCurrency.value = item.currency || 'Q';
+        if (editCurrency) {
+            const isSecond = item.currency === 'second' || item.currency === '$' || (window.currencyState && (item.currency === window.currencyState.secondSymbol || item.currency === window.currencyState.secondCode));
+            editCurrency.value = isSecond ? 'second' : 'local';
+        }
 
         if (mode === 'shopping') {
             if (pmRow) pmRow.style.display = 'flex';
@@ -1164,15 +1372,17 @@ async function saveEdit() {
             await fetchReminders(false);
         } else if (mode === 'shopping') {
             const val = parseFloat(document.getElementById('edit-value')?.value || '0') || 0;
-            const cur = document.getElementById('edit-currency')?.value || 'Q';
+            const cur = document.getElementById('edit-currency')?.value || 'local';
             const pm = document.getElementById('edit-payment-method')?.value || '';
-            await py.update_shopping(id, text, val, cur, date || '', pm);
-            await fetchShoppingList(false);
+            const category = document.getElementById('edit-category')?.value || 'Otros';
+            await py.update_shopping(id, text, val, cur, date || '', pm, category);
+            if (window.fetchBudget) window.fetchBudget();
         } else if (mode === 'income') {
             const val = parseFloat(document.getElementById('edit-value')?.value || '0') || 0;
-            const cur = document.getElementById('edit-currency')?.value || 'Q';
-            await py.update_income(id, text, val, cur, date || '');
-            await fetchIncomeList(false);
+            const cur = document.getElementById('edit-currency')?.value || 'local';
+            const category = document.getElementById('edit-category')?.value || 'Otros';
+            await py.update_income(id, text, val, cur, date || '', category);
+            if (window.fetchBudget) window.fetchBudget();
         }
 
         hideEditModal();
@@ -1184,7 +1394,7 @@ async function saveEdit() {
 }
 
 async function activateTab(tabName) {
-    const target = isTabVisible(tabName) ? tabName : 'agenda';
+    const target = isTabVisible(tabName) ? tabName : getFirstVisibleTab();
     localStorage.setItem('lastAgendaTab', target);
 
     if (target === 'passwords' && py?.hide_browser_bar) {
@@ -1205,8 +1415,15 @@ async function activateTab(tabName) {
     updateConfigHighlight(target);
 
     if (target === 'agenda') await fetchReminders();
-    else if (target === 'shopping') await fetchShoppingList();
-    else if (target === 'income') await fetchIncomeList();
+    else if (target === 'budget') {
+        if (window.fetchBudget) await window.fetchBudget();
+    }
+    else if (target === 'savings') {
+        if (window.fetchSavings) await window.fetchSavings();
+    }
+    else if (target === 'debts') {
+        if (window.fetchDebts) await window.fetchDebts();
+    }
     else if (target === 'kanban') await fetchKanban();
     else if (target === 'notes') await fetchNotes();
     else if (target === 'passwords') await pwLoad();
@@ -1217,11 +1434,24 @@ async function fetchReminders(resetPage = true) {
     if (resetPage) state.page.reminders = 1;
 
     try {
-        state.reminders = await py.get_agenda();
+        const [agenda, kanbanCards] = await Promise.all([
+            py.get_agenda(),
+            py.get_kanban_cards()
+        ]);
+        state.reminders = agenda;
+        state.kanbanCards = kanbanCards || [];
+        
         renderReminders();
+        renderCalendar();
+        
+        const calDayModal = document.getElementById('calendar-day-details-modal');
+        if (calDayModal) {
+            calDayModal.classList.remove('active');
+        }
     } catch (err) {
         console.error('Error fetching reminders:', err);
-        document.getElementById('reminders-list').innerHTML = '<div class="ag-empty">Error al cargar tareas</div>';
+        const listEl = document.getElementById('reminders-list');
+        if (listEl) listEl.innerHTML = '<div class="ag-empty">Error al cargar tareas</div>';
     }
 }
 
@@ -1290,16 +1520,21 @@ function renderReminders() {
 
     list.innerHTML = '';
     chunk.forEach((r) => {
-        const due = r.dueDate ? new Date(r.dueDate) : null;
+        // 'AAAA-MM-DD' se interpreta en UTC con new Date(): en América sale el día anterior.
+        const ymd = /^(\d{4})-(\d{2})-(\d{2})$/.exec(r.dueDate || '');
+        const due = ymd ? new Date(+ymd[1], +ymd[2] - 1, +ymd[3]) : (r.dueDate ? new Date(r.dueDate) : null);
         const dateStr = due ? due.toLocaleDateString('es', { day: '2-digit', month: 'short' }) : '';
         const tags = getReminderTagsFromRow(r);
         const visibleTags = tags.slice(0, 2);
         const hiddenCount = Math.max(0, tags.length - visibleTags.length);
 
+        const gcalBtn = (window.gcalState && window.gcalState.connected) ? 
+            `<button class="ag-gcal-btn" data-action="publishReminderGCal" data-json='${jsonStr(r)}' title="Publicar en Google Calendar" style="background:none; border:none; cursor:pointer; font-size:0.95rem; margin-right:4px;">📅</button>` : '';
+
         const row = document.createElement('div');
         row.className = `ag-item ${r.done ? 'ag-item-paid' : ''}`;
         row.innerHTML = `
-            <button class="ag-check-btn ${r.done ? 'checked' : ''}" onclick="toggleReminder(${r.id}, ${r.done ? 'true' : 'false'})" title="Marcar completada">
+            <button class="ag-check-btn ${r.done ? 'checked' : ''}" data-action="toggleReminder" data-id="${r.id}" data-done="${r.done ? 'true' : 'false'}" title="Marcar completada">
                 <span class="ag-check-box"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="white" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg></span>
             </button>
             <span class="ag-item-text">${escapeHtml(r.text)}</span>
@@ -1307,9 +1542,10 @@ function renderReminders() {
                 ${visibleTags.map((tag) => `<span class="ag-tag-badge" title="${escapeHtml(tags.join(', '))}">🏷️ ${escapeHtml(tag)}</span>`).join('')}
                 ${hiddenCount > 0 ? `<span class="ag-tag-badge" title="${escapeHtml(tags.join(', '))}">+${hiddenCount}</span>` : ''}
                 ${dateStr ? `<span class="ag-badge">📅 ${dateStr}</span>` : ''}
-                <button class="ag-notes-btn ${r.notes ? 'has-notes' : ''}" onclick='openObsModal("agenda", ${r.id}, ${JSON.stringify(r.notes || '')})' title="Observaciones">📝</button>
-                <button class="ag-edit-btn" onclick='openEditModal("reminder", ${jsonStr(r)})'>✏️</button>
-                <button class="ag-delete-btn" onclick="deleteReminder(${r.id})">🗑️</button>
+                ${gcalBtn}
+                <button class="ag-notes-btn ${r.notes ? 'has-notes' : ''}" data-action="openObsModal" data-tab="agenda" data-id="${r.id}" data-notes="${escapeHtml(r.notes || '')}" title="Observaciones">📝</button>
+                <button class="ag-edit-btn" data-action="openEditModal" data-type="reminder" data-json='${jsonStr(r)}'>✏️</button>
+                <button class="ag-delete-btn" data-action="deleteReminder" data-id="${r.id}">🗑️</button>
             </div>`;
         list.appendChild(row);
     });
@@ -1370,6 +1606,600 @@ async function deleteReminder(id) {
         await py.delete_agenda(id);
         fetchReminders(false);
     });
+}
+
+async function clearDoneAgendaReminders() {
+    window.showConfirm('¿Estás seguro de que deseas eliminar todas las tareas completadas de la Agenda? Esta acción no se puede deshacer.', async (ok) => {
+        if (!ok) return;
+        try {
+            const doneReminders = state.reminders.filter(r => r.done == 1 || r.done == true);
+            if (!doneReminders || doneReminders.length === 0) {
+                notify('No hay tareas completadas para limpiar', 'info');
+                return;
+            }
+
+            const idsToDelete = doneReminders.map(r => r.id);
+            await py.delete_agenda_batch(idsToDelete);
+
+            await fetchReminders();
+            notify('Tareas completadas eliminadas de la Agenda', 'success');
+        } catch (err) {
+            console.error('Error al limpiar tareas de la agenda:', err);
+            notify('No se pudieron limpiar las tareas completadas', 'info');
+        }
+    });
+}
+
+function switchAgendaView(view) {
+    state.agendaView = view;
+    localStorage.setItem('lastAgendaView', view);
+    
+    const listBtn = document.getElementById('btn-agenda-list-view');
+    const calBtn = document.getElementById('btn-agenda-cal-view');
+    const listContainer = document.getElementById('agenda-list-container');
+    const calContainer = document.getElementById('agenda-calendar-container');
+    const filterRow = document.getElementById('agenda-filter-row-container');
+
+    const calKanbanToggleWrapper = document.getElementById('cal-kanban-toggle-wrapper');
+    const calCalendarToggleWrapper = document.getElementById('cal-calendar-toggle-wrapper');
+
+    if (view === 'list') {
+        if (listBtn) listBtn.classList.add('active');
+        if (calBtn) calBtn.classList.remove('active');
+        if (listContainer) listContainer.style.display = 'block';
+        if (calContainer) calContainer.style.display = 'none';
+        if (filterRow) filterRow.style.display = 'flex';
+        if (calKanbanToggleWrapper) calKanbanToggleWrapper.style.display = 'none';
+        if (calCalendarToggleWrapper) calCalendarToggleWrapper.style.display = 'none';
+        renderReminders();
+    } else {
+        if (listBtn) listBtn.classList.remove('active');
+        if (calBtn) calBtn.classList.add('active');
+        if (listContainer) listContainer.style.display = 'none';
+        if (calContainer) calContainer.style.display = 'flex';
+        if (filterRow) filterRow.style.display = 'flex';
+        if (calKanbanToggleWrapper) calKanbanToggleWrapper.style.display = 'flex';
+        if (calCalendarToggleWrapper) calCalendarToggleWrapper.style.display = 'flex';
+        renderCalendar();
+    }
+}
+
+function populateCalendarDropdowns() {
+    const monthSelect = document.getElementById('cal-month-select');
+    const yearSelect = document.getElementById('cal-year-select');
+    if (!monthSelect || !yearSelect) return;
+
+    if (monthSelect.options.length === 0) {
+        const months = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+        months.forEach((m, idx) => {
+            const opt = document.createElement('option');
+            opt.value = idx;
+            opt.textContent = m;
+            monthSelect.appendChild(opt);
+        });
+    }
+
+    const calendarYear = state.calendarDate.getFullYear();
+    let needsRegen = yearSelect.options.length === 0;
+    if (!needsRegen) {
+        const firstOpt = parseInt(yearSelect.options[0].value);
+        const lastOpt = parseInt(yearSelect.options[yearSelect.options.length - 1].value);
+        if (calendarYear < firstOpt || calendarYear > lastOpt) {
+            needsRegen = true;
+        }
+    }
+
+    if (needsRegen) {
+        yearSelect.innerHTML = '';
+        for (let y = calendarYear - 5; y <= calendarYear + 5; y++) {
+            const opt = document.createElement('option');
+            opt.value = y;
+            opt.textContent = y;
+            yearSelect.appendChild(opt);
+        }
+    }
+}
+
+function navigateCalendar(action, value) {
+    const date = state.calendarDate;
+    if (action === 'prev') {
+        date.setMonth(date.getMonth() - 1);
+    } else if (action === 'next') {
+        date.setMonth(date.getMonth() + 1);
+    } else if (action === 'today') {
+        state.calendarDate = new Date();
+    } else if (action === 'month') {
+        date.setMonth(parseInt(value));
+    } else if (action === 'year') {
+        date.setFullYear(parseInt(value));
+    }
+    renderCalendar();
+}
+
+function openNewReminderAtDate(dateStr) {
+    const newModal = document.getElementById('new-reminder-modal');
+    if (!newModal) return;
+
+    const txtInput = document.getElementById('new-reminder-input');
+    const tagInput = document.getElementById('new-reminder-tag');
+    const dateInput = document.getElementById('new-reminder-date');
+    
+    if (txtInput) txtInput.value = '';
+    if (tagInput) tagInput.value = '';
+    if (dateInput) dateInput.value = dateStr;
+    
+    renderNewReminderTagHelper();
+    newModal.classList.add('active');
+}
+
+async function renderCalendar() {
+    populateCalendarDropdowns();
+
+    const monthSelect = document.getElementById('cal-month-select');
+    const yearSelect = document.getElementById('cal-year-select');
+    const monthYearLabel = document.getElementById('cal-month-year-label');
+    const grid = document.getElementById('calendar-days-grid');
+    if (!grid) return;
+
+    // Cargar las tarjetas Kanban frescas de forma asíncrona si está activo
+    if (state.calShowKanban) {
+        try {
+            state.kanbanCards = await py.get_kanban_cards() || [];
+        } catch (e) {
+            console.error('Error al cargar tarjetas de kanban para calendario:', e);
+        }
+    }
+
+    // Calcular dinámicamente cuántas tareas caben por celda
+    const gridHeight = grid.clientHeight || 450;
+    const rowCount = 6;
+    const cellHeight = (gridHeight - (rowCount - 1) * 4) / rowCount;
+    const availableHeight = cellHeight - 24; // Restar altura de la cabecera
+    const maxVisible = Math.max(1, Math.floor(availableHeight / 19));
+
+    const currentYear = state.calendarDate.getFullYear();
+    const currentMonth = state.calendarDate.getMonth();
+
+    if (monthSelect) monthSelect.value = currentMonth;
+    if (yearSelect) yearSelect.value = currentYear;
+
+    const months = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+    if (monthYearLabel) {
+        monthYearLabel.textContent = `${months[currentMonth]} ${currentYear}`;
+    }
+
+    grid.innerHTML = '';
+
+    // Primer día del mes
+    const firstDay = new Date(currentYear, currentMonth, 1);
+    // Día de la semana del primer día (0: Domingo, 1: Lunes, etc.)
+    const dayOfWeek = firstDay.getDay();
+    // Offset para que empiece en Lunes (0: Lun, 1: Mar, ..., 6: Dom)
+    const offset = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+
+    // Días en el mes
+    const totalDays = new Date(currentYear, currentMonth + 1, 0).getDate();
+    // Días del mes anterior
+    const prevTotalDays = new Date(currentYear, currentMonth, 0).getDate();
+
+    // Rellenar días del mes anterior
+    for (let i = offset - 1; i >= 0; i--) {
+        const dayNum = prevTotalDays - i;
+        const cell = document.createElement('div');
+        cell.className = 'cal-day-cell other-month';
+        cell.innerHTML = `
+            <div class="cal-day-header" style="display:flex; justify-content:space-between; align-items:center; width:100%; margin-bottom:4px;">
+                <span class="cal-day-num" style="margin:0;">${dayNum}</span>
+                <span class="cal-more-indicator" style="display:none;"></span>
+            </div>
+            <div class="cal-day-events"></div>
+        `;
+        
+        const prevMonthDate = new Date(currentYear, currentMonth - 1, dayNum);
+        const dateStr = prevMonthDate.toISOString().split('T')[0];
+        cell.onclick = () => openNewReminderAtDate(dateStr);
+        
+        renderEventsForCell(cell, dateStr, maxVisible);
+        grid.appendChild(cell);
+    }
+
+    const todayObj = new Date();
+    const todayStr = todayObj.toISOString().split('T')[0];
+
+    // Rellenar días del mes actual
+    for (let dayNum = 1; dayNum <= totalDays; dayNum++) {
+        const cell = document.createElement('div');
+        const cellDate = new Date(currentYear, currentMonth, dayNum);
+        // Formatear fecha local YYYY-MM-DD
+        const y = cellDate.getFullYear();
+        const m = String(cellDate.getMonth() + 1).padStart(2, '0');
+        const d = String(cellDate.getDate()).padStart(2, '0');
+        const dateStr = `${y}-${m}-${d}`;
+
+        cell.className = 'cal-day-cell';
+        if (dateStr === todayStr) {
+            cell.classList.add('today');
+        }
+
+        cell.innerHTML = `
+            <div class="cal-day-header" style="display:flex; justify-content:space-between; align-items:center; width:100%; margin-bottom:4px;">
+                <span class="cal-day-num" style="margin:0;">${dayNum}</span>
+                <span class="cal-more-indicator" style="display:none;"></span>
+            </div>
+            <div class="cal-day-events"></div>
+        `;
+        cell.onclick = () => openNewReminderAtDate(dateStr);
+
+        renderEventsForCell(cell, dateStr, maxVisible);
+        grid.appendChild(cell);
+    }
+
+    // Rellenar días del mes siguiente hasta completar una grilla limpia (múltiplo de 7)
+    const totalCells = grid.children.length;
+    const remainingCells = totalCells % 7 === 0 ? 0 : 7 - (totalCells % 7);
+    for (let dayNum = 1; dayNum <= remainingCells; dayNum++) {
+        const cell = document.createElement('div');
+        cell.className = 'cal-day-cell other-month';
+        cell.innerHTML = `
+            <div class="cal-day-header" style="display:flex; justify-content:space-between; align-items:center; width:100%; margin-bottom:4px;">
+                <span class="cal-day-num" style="margin:0;">${dayNum}</span>
+                <span class="cal-more-indicator" style="display:none;"></span>
+            </div>
+            <div class="cal-day-events"></div>
+        `;
+        
+        const nextMonthDate = new Date(currentYear, currentMonth + 1, dayNum);
+        const dateStr = nextMonthDate.toISOString().split('T')[0];
+        cell.onclick = () => openNewReminderAtDate(dateStr);
+
+        renderEventsForCell(cell, dateStr, maxVisible);
+        grid.appendChild(cell);
+    }
+}
+
+function renderEventsForCell(cell, dateStr, maxVisible) {
+    const eventsContainer = cell.querySelector('.cal-day-events');
+    const moreIndicator = cell.querySelector('.cal-more-indicator');
+    if (!eventsContainer) return;
+
+    const tagFilter = state.reminderTagFilter || REMINDER_TAG_ALL;
+
+    const matchingReminders = state.reminders.filter((r) => {
+        if (!r.dueDate) return false;
+        // Normalizar dueDate a YYYY-MM-DD
+        const rDate = r.dueDate.split('T')[0];
+        if (rDate !== dateStr) return false;
+        // Filtro de etiqueta
+        if (tagFilter !== REMINDER_TAG_ALL) {
+            const tags = (r.tag || '').split(',').map(t => t.trim()).filter(Boolean);
+            if (!tags.includes(tagFilter)) return false;
+        }
+        return true;
+    });
+
+    const matchingKanban = [];
+    if (state.calShowKanban && Array.isArray(state.kanbanCards)) {
+        const todayObj = new Date();
+        const y = todayObj.getFullYear();
+        const m = String(todayObj.getMonth() + 1).padStart(2, '0');
+        const d = String(todayObj.getDate()).padStart(2, '0');
+        const todayStr = `${y}-${m}-${d}`;
+        state.kanbanCards.forEach((card) => {
+            const parsed = parseKanbanCardText(card.text);
+            if (parsed.due && parsed.due >= todayStr) {
+                // Solo mostrar desde hoy hasta la fecha de vencimiento
+                const showInThisCell = (dateStr >= todayStr && dateStr <= parsed.due);
+                if (showInThisCell) {
+                    matchingKanban.push({
+                        id: card.id,
+                        text: `📋 [KB] ${parsed.title}`,
+                        done: card.col_id === 4,
+                        isKanban: true,
+                        colId: card.col_id,
+                        tag: 'Kanban',
+                        originalCard: card
+                    });
+                }
+            }
+        });
+    }
+
+    const matchingGCal = [];
+    if (state.calShowCalendar && window.gcalEvents && Array.isArray(window.gcalEvents)) {
+        window.gcalEvents.forEach((ev) => {
+            const startVal = ev.start?.date || ev.start?.dateTime;
+            if (startVal) {
+                const evDate = startVal.split('T')[0];
+                if (evDate === dateStr) {
+                    matchingGCal.push({
+                        id: ev.id,
+                        text: `📅 ${ev.summary}`,
+                        done: false,
+                        isGCal: true,
+                        htmlLink: ev.htmlLink,
+                        calendarName: ev.calendarName,
+                        description: ev.description || '',
+                        location: ev.location || '',
+                        start: ev.start,
+                        end: ev.end
+                    });
+                }
+            }
+        });
+    }
+
+    const allEvents = [...matchingReminders, ...matchingKanban, ...matchingGCal];
+
+    const hasMore = allEvents.length > maxVisible;
+    const visibleEvents = hasMore ? allEvents.slice(0, maxVisible) : allEvents;
+
+    if (hasMore && moreIndicator) {
+        moreIndicator.textContent = `+${allEvents.length - maxVisible}`;
+        moreIndicator.style.display = 'inline-block';
+        moreIndicator.onclick = (e) => {
+            e.stopPropagation();
+            openDayDetailsModal(dateStr, allEvents);
+        };
+    } else if (moreIndicator) {
+        moreIndicator.style.display = 'none';
+    }
+
+    visibleEvents.forEach((r) => {
+        const evCard = document.createElement('div');
+        if (r.isKanban) {
+            let kbStatus = 'pending';
+            if (r.colId === 2) kbStatus = 'inprogress';
+            else if (r.colId === 3) kbStatus = 'blocked';
+            else if (r.colId === 4) kbStatus = 'done';
+            evCard.className = `cal-event-card kanban-task kb-status-${kbStatus}`;
+        } else if (r.isGCal) {
+            evCard.className = 'cal-event-card gcal-task';
+        } else {
+            evCard.className = `cal-event-card ${r.done ? 'done' : 'pending'}`;
+        }
+        evCard.textContent = r.text;
+        evCard.title = r.isGCal ? `${r.text} (${r.calendarName})` : `${r.text} ${r.tag ? '(🏷️ ' + r.tag + ')' : ''}`;
+        
+        evCard.onclick = (e) => {
+            e.stopPropagation(); // Evitar abrir modal de creación
+            if (r.isKanban) {
+                editKanbanCard(r.id);
+            } else if (r.isGCal) {
+                openGCalEventModal(r);
+            } else {
+                openEditModal('reminder', r);
+            }
+        };
+        
+        eventsContainer.appendChild(evCard);
+    });
+}
+
+function openDayDetailsModal(dateStr, reminders) {
+    const modal = document.getElementById('calendar-day-details-modal');
+    const titleEl = document.getElementById('cal-day-modal-title');
+    const listEl = document.getElementById('cal-day-modal-list');
+    if (!modal || !listEl) return;
+
+    // Formatear fecha a algo amigable
+    const parts = dateStr.split('-');
+    const formattedDate = parts.length === 3 ? `${parts[2]}/${parts[1]}/${parts[0]}` : dateStr;
+    if (titleEl) {
+        titleEl.textContent = `Tareas del día — ${formattedDate}`;
+    }
+
+    listEl.innerHTML = '';
+
+    reminders.forEach((r) => {
+        const itemEl = document.createElement('div');
+        itemEl.className = 'ag-item';
+
+        // Definir colores y estilos según el tipo de tarea
+        let bgColor = 'rgba(255,255,255,0.02)';
+        let borderColor = 'rgba(255,255,255,0.06)';
+        let borderLeft = '3px solid rgba(255,255,255,0.1)';
+        let hoverBg = 'rgba(108, 92, 231, 0.08)';
+        let hoverBorder = 'rgba(108, 92, 231, 0.2)';
+
+        if (r.isGCal) {
+            borderLeft = '3px solid #4285f4';
+            bgColor = 'rgba(66, 133, 244, 0.06)';
+            borderColor = 'rgba(66, 133, 244, 0.15)';
+            hoverBg = 'rgba(66, 133, 244, 0.12)';
+            hoverBorder = 'rgba(66, 133, 244, 0.25)';
+        } else if (r.isKanban) {
+            if (r.colId === 1) { // pending
+                borderLeft = '3px solid #fdcb6e';
+                bgColor = 'rgba(253, 203, 110, 0.06)';
+                borderColor = 'rgba(253, 203, 110, 0.15)';
+                hoverBg = 'rgba(253, 203, 110, 0.12)';
+                hoverBorder = 'rgba(253, 203, 110, 0.25)';
+            } else if (r.colId === 2) { // inprogress
+                borderLeft = '3px solid #6c5ce7';
+                bgColor = 'rgba(108, 92, 231, 0.06)';
+                borderColor = 'rgba(108, 92, 231, 0.15)';
+                hoverBg = 'rgba(108, 92, 231, 0.12)';
+                hoverBorder = 'rgba(108, 92, 231, 0.25)';
+            } else if (r.colId === 3) { // blocked
+                borderLeft = '3px solid #e17055';
+                bgColor = 'rgba(225, 112, 85, 0.06)';
+                borderColor = 'rgba(225, 112, 85, 0.15)';
+                hoverBg = 'rgba(225, 112, 85, 0.12)';
+                hoverBorder = 'rgba(225, 112, 85, 0.25)';
+            } else if (r.colId === 4) { // done
+                borderLeft = '3px solid #00b894';
+                bgColor = 'rgba(0, 184, 148, 0.04)';
+                borderColor = 'rgba(0, 184, 148, 0.12)';
+                hoverBg = 'rgba(0, 184, 148, 0.08)';
+                hoverBorder = 'rgba(0, 184, 148, 0.22)';
+            }
+        } else { // agenda normal
+            if (r.done) {
+                borderLeft = '3px solid #00b894';
+                bgColor = 'rgba(0, 184, 148, 0.04)';
+                borderColor = 'rgba(0, 184, 148, 0.12)';
+                hoverBg = 'rgba(0, 184, 148, 0.08)';
+                hoverBorder = 'rgba(0, 184, 148, 0.22)';
+            } else {
+                borderLeft = '3px solid #e84393';
+                bgColor = 'rgba(253, 121, 168, 0.06)';
+                borderColor = 'rgba(253, 121, 168, 0.15)';
+                hoverBg = 'rgba(253, 121, 168, 0.12)';
+                hoverBorder = 'rgba(253, 121, 168, 0.25)';
+            }
+        }
+
+        itemEl.style.cssText = `display:flex; justify-content:space-between; align-items:center; padding:12px; margin-bottom:8px; border-radius:8px; background:${bgColor}; border:1px solid ${borderColor}; border-left:${borderLeft}; cursor:pointer; transition: all 0.2s ease;`;
+        
+        itemEl.onmouseenter = () => {
+            itemEl.style.background = hoverBg;
+            itemEl.style.borderColor = hoverBorder;
+        };
+        itemEl.onmouseleave = () => {
+            itemEl.style.background = bgColor;
+            itemEl.style.borderColor = borderColor;
+        };
+
+        const leftEl = document.createElement('div');
+        leftEl.style.cssText = 'display:flex; flex-direction:column; gap:4px; max-width:80%;';
+
+        const textSpan = document.createElement('span');
+        textSpan.textContent = r.text;
+        textSpan.style.cssText = r.done ? 'text-decoration:line-through; opacity:0.5;' : 'font-weight:600;';
+        leftEl.appendChild(textSpan);
+
+        if (r.tag) {
+            const tagsWrapper = document.createElement('div');
+            tagsWrapper.style.cssText = 'display:flex; gap:4px; flex-wrap:wrap;';
+            const tags = r.tag.split(',').map(t => t.trim()).filter(Boolean);
+            tags.forEach((tag) => {
+                const tagBadge = document.createElement('span');
+                tagBadge.className = 'ag-tag-badge';
+                tagBadge.textContent = tag;
+                tagBadge.style.fontSize = '0.65rem';
+                
+                // Aplicar color personalizado a las badges según estatus
+                if (r.isKanban) {
+                    if (r.colId === 1) {
+                        tagBadge.style.background = 'rgba(253, 203, 110, 0.15)';
+                        tagBadge.style.color = '#fdcb6e';
+                    } else if (r.colId === 2) {
+                        tagBadge.style.background = 'rgba(108, 92, 231, 0.15)';
+                        tagBadge.style.color = '#a29bfe';
+                    } else if (r.colId === 3) {
+                        tagBadge.style.background = 'rgba(225, 112, 85, 0.15)';
+                        tagBadge.style.color = '#ffaa90';
+                    } else if (r.colId === 4) {
+                        tagBadge.style.background = 'rgba(0, 184, 148, 0.15)';
+                        tagBadge.style.color = '#00b894';
+                    }
+                } else if (r.isGCal) {
+                    tagBadge.style.background = 'rgba(66, 133, 244, 0.15)';
+                    tagBadge.style.color = '#8ab4f8';
+                }
+                
+                tagsWrapper.appendChild(tagBadge);
+            });
+            leftEl.appendChild(tagsWrapper);
+        }
+
+        itemEl.appendChild(leftEl);
+
+        if (!r.isGCal) {
+            const editBtn = document.createElement('button');
+            editBtn.className = 'ag-edit-btn';
+            editBtn.textContent = '✏️';
+            editBtn.style.cssText = 'background:none; border:none; cursor:pointer; font-size:1.1rem; padding:4px;';
+            itemEl.appendChild(editBtn);
+        }
+
+        itemEl.onclick = () => {
+            modal.classList.remove('active');
+            if (r.isKanban) {
+                editKanbanCard(r.id);
+            } else if (r.isGCal) {
+                openGCalEventModal(r);
+            } else {
+                openEditModal('reminder', r);
+            }
+        };
+
+        listEl.appendChild(itemEl);
+    });
+
+    modal.classList.add('active');
+}
+
+function openGCalEventModal(eventInfo) {
+    const modal = document.getElementById('gcal-event-modal');
+    const detailsContent = document.getElementById('gcal-event-details-content');
+    const linkBtn = document.getElementById('gcal-event-link-btn');
+    if (!modal || !detailsContent) return;
+
+    // Formatear fechas y horas
+    let startStr = 'Sin fecha de inicio';
+    let endStr = 'Sin fecha de fin';
+    
+    if (eventInfo.start) {
+        if (eventInfo.start.dateTime) {
+            const startDate = new Date(eventInfo.start.dateTime);
+            startStr = startDate.toLocaleString('es-ES', { dateStyle: 'long', timeStyle: 'short' });
+        } else if (eventInfo.start.date) {
+            startStr = eventInfo.start.date + ' (Todo el día)';
+        }
+    }
+    if (eventInfo.end) {
+        if (eventInfo.end.dateTime) {
+            const endDate = new Date(eventInfo.end.dateTime);
+            endStr = endDate.toLocaleString('es-ES', { dateStyle: 'long', timeStyle: 'short' });
+        } else if (eventInfo.end.date) {
+            endStr = eventInfo.end.date + ' (Todo el día)';
+        }
+    }
+
+    // Limpiar contenido y construir información detallada
+    detailsContent.innerHTML = `
+        <div style="display:flex; flex-direction:column; gap:4px;">
+            <strong style="color:var(--text-muted, #a0a0a0); font-size:0.8rem; text-transform:uppercase;">Título</strong>
+            <span style="font-size:1.1rem; font-weight:600; color:var(--text-color, #ffffff);">${eventInfo.text ? eventInfo.text.replace('📅 ', '') : 'Sin título'}</span>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:4px;">
+            <strong style="color:var(--text-muted, #a0a0a0); font-size:0.8rem; text-transform:uppercase;">Inicio</strong>
+            <span style="color:var(--text-color, #ffffff);">${startStr}</span>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:4px;">
+            <strong style="color:var(--text-muted, #a0a0a0); font-size:0.8rem; text-transform:uppercase;">Fin</strong>
+            <span style="color:var(--text-color, #ffffff);">${endStr}</span>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:4px;">
+            <strong style="color:var(--text-muted, #a0a0a0); font-size:0.8rem; text-transform:uppercase;">Calendario</strong>
+            <span style="color:var(--text-color, #ffffff);">${eventInfo.calendarName || 'Principal'}</span>
+        </div>
+        ${eventInfo.location ? `
+        <div style="display:flex; flex-direction:column; gap:4px;">
+            <strong style="color:var(--text-muted, #a0a0a0); font-size:0.8rem; text-transform:uppercase;">Ubicación</strong>
+            <span style="color:var(--text-color, #ffffff);">${eventInfo.location}</span>
+        </div>` : ''}
+        ${eventInfo.description ? `
+        <div style="display:flex; flex-direction:column; gap:4px;">
+            <strong style="color:var(--text-muted, #a0a0a0); font-size:0.8rem; text-transform:uppercase;">Descripción</strong>
+            <div style="color:var(--text-color, #ffffff); white-space:pre-wrap; max-height:150px; overflow-y:auto; background:rgba(255,255,255,0.03); padding:8px; border-radius:4px; border:1px solid rgba(255,255,255,0.05); font-size:0.9rem;">${eventInfo.description}</div>
+        </div>` : ''}
+    `;
+
+    // Configurar botón para abrir en Google Calendar si tiene htmlLink
+    if (linkBtn) {
+        if (eventInfo.htmlLink) {
+            linkBtn.style.display = 'block';
+            linkBtn.onclick = () => {
+                window.open(eventInfo.htmlLink, '_blank');
+            };
+        } else {
+            linkBtn.style.display = 'none';
+        }
+    }
+
+    modal.classList.add('active');
 }
 
 async function fetchShoppingList(resetPage = true) {
@@ -1442,16 +2272,16 @@ function renderShopping() {
         const row = document.createElement('div');
         row.className = `ag-item ${r.done ? 'ag-item-paid' : ''}`;
         row.innerHTML = `
-            <button class="ag-check-btn ${r.done ? 'checked' : ''}" onclick="toggleShopping(${r.id}, ${r.done ? 'true' : 'false'})" title="Marcar pagado">
+            <button class="ag-check-btn ${r.done ? 'checked' : ''}" data-action="toggleShopping" data-id="${r.id}" data-done="${r.done ? 'true' : 'false'}" title="Marcar pagado">
                 <span class="ag-check-box"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="white" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg></span>
             </button>
             <span class="ag-item-text">${escapeHtml(r.text)}</span>
             <div class="ag-item-meta">
                 <span style="font-weight:700; color:#ff7f50;">${r.currency}${fmtNum(r.value)}</span>
                 <span class="pm-badge ${pmBadgeClass(r.paymentMethod)}">${escapeHtml(r.paymentMethod || 'Pendiente')}</span>
-                <button class="ag-notes-btn ${r.notes ? 'has-notes' : ''}" onclick='openObsModal("shopping", ${r.id}, ${JSON.stringify(r.notes || '')})' title="Observaciones">📝</button>
-                <button class="ag-edit-btn" onclick='openEditModal("shopping", ${jsonStr(r)})'>✏️</button>
-                <button class="ag-delete-btn" onclick="deleteShopping(${r.id})">🗑️</button>
+                <button class="ag-notes-btn ${r.notes ? 'has-notes' : ''}" data-action="openObsModal" data-tab="shopping" data-id="${r.id}" data-notes="${escapeHtml(r.notes || '')}" title="Observaciones">📝</button>
+                <button class="ag-edit-btn" data-action="openEditModal" data-type="shopping" data-json='${jsonStr(r)}'>✏️</button>
+                <button class="ag-delete-btn" data-action="deleteShopping" data-id="${r.id}">🗑️</button>
             </div>`;
         list.appendChild(row);
     });
@@ -1535,35 +2365,42 @@ function renderPaymentSummary() {
 async function addShopping() {
     const text = (document.getElementById('shop-item-input')?.value || '').trim();
     const val = parseFloat(document.getElementById('shop-value-input')?.value || '');
-    const cur = document.getElementById('shop-currency-select')?.value || 'Q';
+    const cur = document.getElementById('shop-currency-select')?.value || 'local';
     const pm = document.getElementById('shop-payment-method-select')?.value || '';
     const date = document.getElementById('shop-date-input')?.value || '';
+    const category = document.getElementById('shop-category-select')?.value || 'Otros';
+    const statusBtn = document.querySelector('#shop-status-toggle .status-btn.active');
+    const status = statusBtn?.dataset.value || 'projected';
 
     if (!text || Number.isNaN(val)) return;
 
-    await py.add_shopping(text, val, cur, date, pm);
+    await py.add_shopping(text, val, cur, date, pm, category, status);
 
     document.getElementById('shop-item-input').value = '';
     document.getElementById('shop-value-input').value = '';
     if (document.getElementById('shop-payment-method-select')) document.getElementById('shop-payment-method-select').value = '';
     if (document.getElementById('shop-date-input')) document.getElementById('shop-date-input').value = '';
+    if (document.getElementById('shop-category-select')) document.getElementById('shop-category-select').value = 'Otros';
+    // Reset toggle to default (projected)
+    document.querySelectorAll('#shop-status-toggle .status-btn').forEach(b => b.classList.remove('active'));
+    document.getElementById('shop-status-projected')?.classList.add('active');
 
     document.getElementById('new-shop-modal')?.classList.remove('active');
 
     notify('Gasto registrado', 'success');
-    fetchShoppingList();
+    if (window.fetchBudget) window.fetchBudget();
 }
 
 async function toggleShopping(id, currentDone) {
     await py.toggle_shopping(id, !currentDone);
-    fetchShoppingList(false);
+    if (window.fetchBudget) window.fetchBudget();
 }
 
 async function deleteShopping(id) {
     window.showConfirm('¿Borrar gasto?', async (ok) => {
         if (!ok) return;
         await py.delete_shopping(id);
-        fetchShoppingList(false);
+        if (window.fetchBudget) window.fetchBudget();
     });
 }
 
@@ -1602,15 +2439,15 @@ function renderIncome() {
         const row = document.createElement('div');
         row.className = `ag-item income-item ${r.received ? 'received' : ''}`;
         row.innerHTML = `
-            <button class="ag-check-btn ${r.received ? 'checked' : ''}" onclick="toggleIncome(${r.id}, ${r.received ? 'true' : 'false'})" title="Marcar recibido">
+            <button class="ag-check-btn ${r.received ? 'checked' : ''}" data-action="toggleIncome" data-id="${r.id}" data-done="${r.received ? 'true' : 'false'}" title="Marcar recibido">
                 <span class="ag-check-box"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="white" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg></span>
             </button>
             <span class="ag-item-text">${escapeHtml(r.text)}</span>
             <div class="ag-item-meta">
                 <span style="font-weight:700; color:#2ed573;">${r.currency}${fmtNum(r.value)}</span>
-                <button class="ag-notes-btn ${r.notes ? 'has-notes' : ''}" onclick='openObsModal("income", ${r.id}, ${JSON.stringify(r.notes || '')})' title="Observaciones">📝</button>
-                <button class="ag-edit-btn" onclick='openEditModal("income", ${jsonStr(r)})'>✏️</button>
-                <button class="ag-delete-btn" onclick="deleteIncome(${r.id})">🗑️</button>
+                <button class="ag-notes-btn ${r.notes ? 'has-notes' : ''}" data-action="openObsModal" data-tab="income" data-id="${r.id}" data-notes="${escapeHtml(r.notes || '')}" title="Observaciones">📝</button>
+                <button class="ag-edit-btn" data-action="openEditModal" data-type="income" data-json='${jsonStr(r)}'>✏️</button>
+                <button class="ag-delete-btn" data-action="deleteIncome" data-id="${r.id}">🗑️</button>
             </div>`;
         list.appendChild(row);
     });
@@ -1626,32 +2463,39 @@ function renderIncome() {
 async function addIncome() {
     const text = (document.getElementById('income-item-input')?.value || '').trim();
     const val = parseFloat(document.getElementById('income-value-input')?.value || '');
-    const cur = document.getElementById('income-currency-select')?.value || 'Q';
+    const cur = document.getElementById('income-currency-select')?.value || 'local';
     const date = document.getElementById('income-date-input')?.value || '';
+    const category = document.getElementById('income-category-select')?.value || 'Otros';
+    const statusBtn = document.querySelector('#income-status-toggle .status-btn.active');
+    const status = statusBtn?.dataset.value || 'projected';
 
     if (!text || Number.isNaN(val)) return;
 
-    await py.add_income(text, val, cur, date);
+    await py.add_income(text, val, cur, date, category, status);
     document.getElementById('income-item-input').value = '';
     document.getElementById('income-value-input').value = '';
     if (document.getElementById('income-date-input')) document.getElementById('income-date-input').value = '';
+    if (document.getElementById('income-category-select')) document.getElementById('income-category-select').value = 'Salario';
+    // Reset toggle to default (projected)
+    document.querySelectorAll('#income-status-toggle .status-btn').forEach(b => b.classList.remove('active'));
+    document.getElementById('income-status-projected')?.classList.add('active');
 
     document.getElementById('new-income-modal')?.classList.remove('active');
 
     notify('Ingreso registrado', 'success');
-    fetchIncomeList();
+    if (window.fetchBudget) window.fetchBudget();
 }
 
 async function toggleIncome(id, currentReceived) {
     await py.toggle_income(id, !currentReceived);
-    fetchIncomeList(false);
+    if (window.fetchBudget) window.fetchBudget();
 }
 
 async function deleteIncome(id) {
     window.showConfirm('¿Borrar ingreso?', async (ok) => {
         if (!ok) return;
         await py.delete_income(id);
-        fetchIncomeList(false);
+        if (window.fetchBudget) window.fetchBudget();
     });
 }
 
@@ -1680,7 +2524,7 @@ function renderPmList() {
         <div class="pm-method-item">
             <span>${escapeHtml(m)}</span>
             <div class="pm-method-actions">
-                <button class="pm-remove-btn" onclick="removePmDraft(${idx})" title="Eliminar">🗑️</button>
+                <button class="pm-remove-btn" data-action="removePmDraft" data-idx="${idx}" title="Eliminar">🗑️</button>
             </div>
         </div>`).join('');
 }
@@ -1725,13 +2569,17 @@ function parseKanbanCardText(text) {
     const result = { title: '', description: '', due: '', priority: 'medium', labels: [] };
     const descParts = [];
     let titleSet = false;
-    
+    let priorityFound = false;
+
     for (const part of parts) {
         if (part.startsWith('Vence: ')) {
             result.due = part.replace('Vence: ', '');
         } else if (part.startsWith('Prioridad: ')) {
-            const p = part.replace('Prioridad: ', '').toLowerCase();
-            if (['high', 'medium', 'low'].includes(p)) result.priority = p;
+            const p = part.replace('Prioridad: ', '').toLowerCase().trim();
+            if (['high', 'medium', 'low'].includes(p)) {
+                result.priority = p;
+                priorityFound = true;
+            }
         } else if (part.startsWith('Etiquetas: ')) {
             const labels = part.replace('Etiquetas: ', '').split(',').map(l => l.trim()).filter(l => l);
             result.labels = labels;
@@ -1740,6 +2588,19 @@ function parseKanbanCardText(text) {
             titleSet = true;
         } else {
             descParts.push(part);
+        }
+    }
+
+    // Si no se encontró prioridad en el texto, intentar detectarla de otros modos
+    if (!priorityFound) {
+        const fullText = (text || '').toLowerCase();
+        // Detectar por emojis o palabras clave
+        if (fullText.includes('🔺') || fullText.includes('alta')) {
+            result.priority = 'high';
+        } else if (fullText.includes('🔸') || fullText.includes('media')) {
+            result.priority = 'medium';
+        } else if (fullText.includes('🔹') || fullText.includes('baja')) {
+            result.priority = 'low';
         }
     }
 
@@ -2154,7 +3015,7 @@ function renderKbLabelSelector() {
     
     container.innerHTML = state.kbAvailableLabels.map(label => `
         <div class="kb-modal-label-chip ${state.kbSelectedLabels.has(label) ? 'selected' : ''}" 
-             onclick="toggleKbLabel('${escapeHtml(label)}')"
+             data-action="toggleKbLabel" data-label="${escapeHtml(label)}"
              style="${getKbLabelStyle(label)}cursor:pointer;">
             ${escapeHtml(label)}
         </div>
@@ -2234,6 +3095,66 @@ function kbInitDropZones() {
     kbDropZonesReady = true;
 }
 
+// Función para obtener la prioridad numérica (para ordenamiento)
+function getPriorityOrder(priority) {
+    const priorityMap = { high: 0, medium: 1, low: 2 };
+    const normalized = String(priority || '').toLowerCase().trim();
+    return priorityMap[normalized] || 2;
+}
+
+// Función para parsear fecha del formato YYYY-MM-DD
+function parseDueDate(dateStr) {
+    if (!dateStr) return null;
+    const cleaned = String(dateStr || '').trim();
+    if (cleaned.length === 0) return null;
+
+    // Intentar parsear como ISO date YYYY-MM-DD
+    if (/^\d{4}-\d{2}-\d{2}$/.test(cleaned)) {
+        const date = new Date(cleaned + 'T00:00:00Z');
+        return isNaN(date.getTime()) ? null : date.getTime();
+    }
+    return null;
+}
+
+// Función SIMPLE para ordenar tarjetas por prioridad y fecha
+function sortKanbanCards(cards) {
+    if (!cards || cards.length === 0) return [];
+
+    // Hacer una copia para no mutar el array original
+    const sorted = [...cards];
+
+    sorted.sort((a, b) => {
+        // Parsear ambas tarjetas
+        const parsedA = parseKanbanCardText(a.text);
+        const parsedB = parseKanbanCardText(b.text);
+
+        // Obtener prioridad numérica
+        const priorityA = getPriorityOrder(parsedA.priority);
+        const priorityB = getPriorityOrder(parsedB.priority);
+
+        // PASO 1: Ordenar por prioridad (HIGH=0 primero, LOW=2 último)
+        if (priorityA !== priorityB) {
+            return priorityA - priorityB;
+        }
+
+        // PASO 2: Dentro de la misma prioridad, por fecha
+        const dateA = parseDueDate(parsedA.due);
+        const dateB = parseDueDate(parsedB.due);
+
+        if (dateA !== null && dateB !== null) {
+            return dateA - dateB; // Fecha más pronta primero
+        }
+
+        if (dateA !== null && dateB === null) return -1; // Con fecha antes que sin fecha
+        if (dateA === null && dateB !== null) return 1;
+
+        // PASO 3: Si todo lo demás es igual, mantener orden por ID
+        return (a.id || 0) - (b.id || 0);
+    });
+
+    return sorted;
+}
+
 async function fetchKanban() {
     // Inicializar drop zones solo una vez
     if (!kbDropZonesReady) kbInitDropZones();
@@ -2246,6 +3167,9 @@ async function fetchKanban() {
         done: 'Completada'
     };
     const priorityLabels = { high: '🔺 Alta', medium: '🔸 Media', low: '🔹 Baja' };
+
+    // DEBUG: Log para verificar ordenamiento
+    const debugSort = localStorage.getItem('kb_debug_sort') === 'true';
 
     // Cargar etiquetas para filtro
     await loadKbLabels();
@@ -2266,12 +3190,35 @@ async function fetchKanban() {
             return true;
         });
 
+        // Ordenar tarjetas por prioridad y fecha de vencimiento
+        const sorted = sortKanbanCards(filtered);
+
+        if (debugSort && sorted && sorted.length > 0) {
+            console.group(`📊 KANBAN [${status}] - ${sorted.length} tarjetas`);
+            console.log('%c=== ORDEN ACTUAL ===', 'color: #6c5ce7; font-weight: bold;');
+            sorted.forEach((card, idx) => {
+                const parsed = parseKanbanCardText(card.text);
+                const priority = parsed.priority || 'medium';
+                const priorityEmoji = { high: '🔺', medium: '🔸', low: '🔹' }[priority];
+                const dueDate = parsed.due || '(sin fecha)';
+                const dueEmoji = parsed.due ? '📅' : '⏳';
+                console.log(
+                    `%c${idx + 1}.%c ${priorityEmoji} ${priority.toUpperCase()}%c | ${parsed.title.substring(0, 40)}... | ${dueEmoji} ${dueDate}`,
+                    'color: #666; font-weight: bold;',
+                    'color: ' + ({high: '#ff7675', medium: '#fdcb6e', low: '#74b9ff'}[priority]) + '; font-weight: bold;',
+                    'color: #999;'
+                );
+            });
+            console.log('%c\n⚠️ Si todas tienen la misma prioridad (medium), edita las tarjetas para asignarles prioridad correctamente', 'color: #e17055; font-style: italic;');
+            console.groupEnd();
+        }
+
         const container = document.getElementById(`cards-${status}`);
         const countEl = document.getElementById(`count-${status}`);
         if (!container || !countEl) continue;
 
-        countEl.textContent = String(filtered.length);
-        container.innerHTML = filtered.map((card) => {
+        countEl.textContent = String(sorted.length);
+        container.innerHTML = sorted.map((card) => {
             const parsed = parseKanbanCardText(card.text);
             const shortId = String(card.id || '').slice(-6);
             const dueInfo = getKbDueInfo(parsed.due, status);
@@ -2297,14 +3244,14 @@ async function fetchKanban() {
                 <div class="kb-card-footer">
                     ${labelsHtml}
                     <div class="kb-card-actions">
-                        <button class="kb-card-btn" onclick="editKanbanCard(${card.id})">✏️</button>
-                        <button class="kb-card-btn del" onclick="deleteKanbanCard(${card.id})">🗑️</button>
+                        <button class="kb-card-btn" data-action="editKanbanCard" data-id="${card.id}">✏️</button>
+                        <button class="kb-card-btn del" data-action="deleteKanbanCard" data-id="${card.id}">🗑️</button>
                     </div>
                 </div>
             </div>`;
         }).join('');
 
-        // Vincular eventos drag de forma dinámica
+        // Vincular eventos drag de forma dinámica para cumplir con CSP
         container.querySelectorAll('.kb-card').forEach((cardEl) => {
             cardEl.addEventListener('dragstart', (e) => {
                 const id = parseInt(cardEl.dataset.id);
@@ -2314,6 +3261,16 @@ async function fetchKanban() {
                 kbDragEnd(e);
             });
         });
+    }
+
+    try {
+        const allCards = await py.get_kanban_cards();
+        state.kanbanCards = allCards || [];
+        if (state.agendaView === 'calendar' && document.getElementById('view-agenda').classList.contains('active')) {
+            renderCalendar();
+        }
+    } catch (err) {
+        console.error('Error fetching global kanban cards:', err);
     }
 }
 
@@ -2354,7 +3311,7 @@ function kbRenderLabelFilter() {
     
     container.innerHTML = state.kbAvailableLabels.map(label => `
         <div class="kb-label-chip ${state.kbActiveLabel === label ? 'active' : ''}" 
-             onclick="toggleKbLabelFilter('${escapeHtml(label)}')"
+             data-action="toggleKbLabelFilter" data-label="${escapeHtml(label)}"
              style="${getKbLabelStyle(label)}cursor:pointer;">
             ${escapeHtml(label)}
         </div>
@@ -2492,6 +3449,93 @@ async function deleteKanbanCard(id) {
         if (!ok) return;
         await py.delete_kanban_card(id);
         await fetchKanban();
+    });
+}
+
+// Función para detectar prioridad automáticamente del texto de la tarjeta
+function detectCardPriority(text) {
+    const lower = (text || '').toLowerCase();
+
+    // Detectar ALTA (palabras clave comunes para tareas urgentes)
+    const highPatterns = ['urgente', 'crítico', 'importante', 'pronto', 'asap', 'muy importante', 'alta prioridad', '🔺', 'crucial', 'emergencia', 'inmediato'];
+    if (highPatterns.some(p => lower.includes(p))) {
+        return 'high';
+    }
+
+    // Detectar BAJA (palabras clave para tareas no urgentes)
+    const lowPatterns = ['baja', 'después', 'cuando pueda', 'opcional', 'puede esperar', 'no urgente', '🔹', 'luego', 'futuro', 'algún día'];
+    if (lowPatterns.some(p => lower.includes(p))) {
+        return 'low';
+    }
+
+    // Default: media
+    return 'medium';
+}
+
+// Función para auto-arreglar prioridades de tarjetas antiguas
+async function autoFixKanbanPriorities() {
+    window.showConfirm(
+        '🔧 Esto asignará automáticamente prioridades a las tarjetas antiguas basándose en su contenido.\n\n' +
+        '¿Estás seguro de que deseas continuar?',
+        async (confirm) => {
+            if (!confirm) return;
+
+            try {
+                notify('⏳ Analizando tarjetas...', 'info');
+                let updatedCount = 0;
+
+                // Procesar todas las columnas
+                for (let col = 1; col <= 4; col++) {
+                    const cards = await py.get_kanban_cards(col);
+                    if (!cards) continue;
+
+                    for (const card of cards) {
+                        const text = card.text || '';
+
+                        // Si ya tiene prioridad, saltar
+                        if (text.includes('Prioridad:')) continue;
+
+                        // Detectar prioridad
+                        const priority = detectCardPriority(text);
+
+                        // Agregar prioridad
+                        const newText = text + ` | Prioridad: ${priority}`;
+
+                        // Guardar
+                        await py.update_kanban_card(card.id, col, newText);
+                        updatedCount++;
+                    }
+                }
+
+                notify(`✅ ${updatedCount} tarjetas actualizadas con prioridades automáticas`, 'success');
+                await fetchKanban();
+            } catch (err) {
+                console.error('Error al auto-arreglar prioridades:', err);
+                notify('❌ Error al asignar prioridades', 'info');
+            }
+        }
+    );
+}
+
+async function clearDoneKanbanCards() {
+    window.showConfirm('¿Estás seguro de que deseas eliminar todas las tareas de la columna "Hechos"? Esta acción no se puede deshacer.', async (ok) => {
+        if (!ok) return;
+        try {
+            const cards = await py.get_kanban_cards(4);
+            if (!cards || cards.length === 0) {
+                notify('No hay tareas para limpiar en la columna Hechos', 'info');
+                return;
+            }
+            
+            const idsToDelete = cards.map(card => card.id);
+            await py.delete_kanban_card_batch(idsToDelete);
+            
+            await fetchKanban();
+            notify('Tareas de la columna Hechos eliminadas', 'success');
+        } catch (err) {
+            console.error('Error al limpiar tareas hechas:', err);
+            notify('No se pudieron limpiar las tareas hechas', 'info');
+        }
     });
 }
 
@@ -2664,30 +3708,33 @@ function buildNote(note) {
     // Eliminar
     div.querySelector('.note-delete').addEventListener('click', async (e) => {
         e.stopPropagation();
-        if (div._resizeObserver) {
-            div._resizeObserver.disconnect();
-            div._resizeObserver = null;
-        }
-        const timerKey = String(note.id);
-        const pending = noteSizeSaveTimers.get(timerKey);
-        if (pending) {
-            clearTimeout(pending);
-            noteSizeSaveTimers.delete(timerKey);
-        }
-        notesData = notesData.filter(n => n.id !== note.id);
-        div.style.transition = 'opacity 0.2s, transform 0.2s';
-        div.style.opacity = '0';
-        div.style.transform = 'scale(0.85)';
-        setTimeout(() => {
-            div.remove();
-            updateCanvasSize();
-            updateNotesCount();
-        }, 200);
-        if (notesData.length === 0) {
-            const hint = document.getElementById('notes-hint');
-            if (hint) hint.style.display = '';
-        }
-        await py.delete_note(note.id);
+        window.showConfirm('¿Borrar esta nota?', async (ok) => {
+            if (!ok) return;
+            if (div._resizeObserver) {
+                div._resizeObserver.disconnect();
+                div._resizeObserver = null;
+            }
+            const timerKey = String(note.id);
+            const pending = noteSizeSaveTimers.get(timerKey);
+            if (pending) {
+                clearTimeout(pending);
+                noteSizeSaveTimers.delete(timerKey);
+            }
+            notesData = notesData.filter(n => n.id !== note.id);
+            div.style.transition = 'opacity 0.2s, transform 0.2s';
+            div.style.opacity = '0';
+            div.style.transform = 'scale(0.85)';
+            setTimeout(() => {
+                div.remove();
+                updateCanvasSize();
+                updateNotesCount();
+            }, 200);
+            if (notesData.length === 0) {
+                const hint = document.getElementById('notes-hint');
+                if (hint) hint.style.display = '';
+            }
+            await py.delete_note(note.id);
+        });
     });
 
     // Cambiar color
@@ -2868,33 +3915,25 @@ document.getElementById('notes-board').addEventListener('dblclick', (e) => {
             if (!isNotesViewVisible()) return;
             const bw = board.clientWidth  - 10;
             const bh = board.clientHeight - 10;
-            const displaced = [];
+            if (bw < 220 || bh < 170) return; // Evitar recolocación en tamaños temporales o muy pequeños
+            
             board.querySelectorAll('.sticky-note').forEach(el => {
                 const noteW = el.offsetWidth  || 220;
                 const noteH = el.offsetHeight || 170;
                 const x = parseInt(el.style.left) || 0;
                 const y = parseInt(el.style.top)  || 0;
-                if (x + noteW > bw || y + noteH > bh) {
-                    displaced.push({ el, noteW, noteH });
+                
+                const newX = Math.max(0, Math.min(x, bw - noteW));
+                const newY = Math.max(0, Math.min(y, bh - noteH));
+                
+                if (newX !== x || newY !== y) {
+                    el.style.left = newX + 'px';
+                    el.style.top  = newY + 'px';
+                    const id = parseInt(el.dataset.id);
+                    const note = notesData.find(n => n.id == id);
+                    if (note) { note.x = newX; note.y = newY; }
+                    py.update_note_pos(id, newX, newY).catch(() => {});
                 }
-            });
-
-            const gap = 14;
-            let curX = gap, curY = gap, rowH = 0;
-            displaced.forEach(({ el, noteW, noteH }) => {
-                if (curX + noteW + gap > bw && curX > gap) {
-                    curX = gap; curY += rowH + gap; rowH = 0;
-                }
-                const newX = Math.min(curX, Math.max(0, bw - noteW));
-                const newY = Math.min(curY, Math.max(0, bh - noteH));
-                el.style.left = newX + 'px';
-                el.style.top  = newY + 'px';
-                const id = parseInt(el.dataset.id);
-                const note = notesData.find(n => n.id == id);
-                if (note) { note.x = newX; note.y = newY; }
-                py.update_note_pos(id, newX, newY).catch(() => {});
-                curX += noteW + gap;
-                rowH  = Math.max(rowH, noteH);
             });
             updateCanvasSize();
         }, 300);
@@ -2915,6 +3954,7 @@ async function pwLoad() {
             notes: p.notes || ''
         }));
         renderPasswords();
+        checkCapturedCredentials();
     } catch (err) {
         console.error('Error loading passwords:', err);
     }
@@ -2958,22 +3998,22 @@ function renderPasswords() {
                     <span class="pw-field-label">Usuario</span>
                     <span class="pw-field-value">${escapeHtml(p.username || '')}</span>
                     <span class="pw-field-actions">
-                        <button class="pw-copy-btn" title="Copiar usuario" aria-label="Copiar usuario" onclick="pwCopy('${encodeURIComponent(p.username || '')}', this)">${PW_SVG_COPY}</button>
+                        <button class="pw-copy-btn" title="Copiar usuario" aria-label="Copiar usuario" data-action="pwCopy" data-text="${encodeURIComponent(p.username || '')}">${PW_SVG_COPY}</button>
                     </span>
                 </div>
                 <div class="pw-field-row">
                     <span class="pw-field-label">Password</span>
                     <span class="pw-field-value ${visible ? '' : 'masked'}">${passView}</span>
                     <span class="pw-field-actions">
-                        <button class="pw-show-btn" title="${visible ? 'Ocultar password' : 'Mostrar password'}" aria-label="${visible ? 'Ocultar password' : 'Mostrar password'}" onclick="togglePwVisibility(${p.id})">${visible ? PW_SVG_EYEOFF : PW_SVG_EYE}</button>
-                        <button class="pw-copy-btn" title="Copiar password" aria-label="Copiar password" onclick="pwCopy('${encodeURIComponent(p.password || '')}', this)">${PW_SVG_COPY}</button>
+                        <button class="pw-show-btn" title="${visible ? 'Ocultar password' : 'Mostrar password'}" aria-label="${visible ? 'Ocultar password' : 'Mostrar password'}" data-action="togglePwVisibility" data-id="${p.id}">${visible ? PW_SVG_EYEOFF : PW_SVG_EYE}</button>
+                        <button class="pw-copy-btn" title="Copiar password" aria-label="Copiar password" data-action="pwCopy" data-text="${encodeURIComponent(p.password || '')}">${PW_SVG_COPY}</button>
                     </span>
                 </div>
                 ${p.notes ? `<div class="pw-field-row"><span class="pw-field-label">Notas</span><span class="pw-field-value">${escapeHtml(p.notes)}</span></div>` : ''}
             </div>
             <div class="pw-card-actions">
-                <button class="pw-action-btn" title="Editar" aria-label="Editar" onclick='openPasswordModal(${jsonStr(p)})'>${PW_SVG_EDIT}</button>
-                <button class="pw-action-btn del" title="Eliminar" aria-label="Eliminar" onclick="deletePassword(${p.id})">${PW_SVG_DEL}</button>
+                <button class="pw-action-btn" title="Editar" aria-label="Editar" data-action="openPasswordModal" data-json='${jsonStr(p)}'>${PW_SVG_EDIT}</button>
+                <button class="pw-action-btn del" title="Eliminar" aria-label="Eliminar" data-action="deletePassword" data-id="${p.id}">${PW_SVG_DEL}</button>
             </div>
         </div>`;
     }).join('');
@@ -3055,6 +4095,13 @@ async function savePassword() {
 
     if (!pw) return;
     await pw.upsert_password(state.pwEditId || 0, site, username, password, type, url, notes);
+    
+    // Si proviene de una credencial interceptada, descartarla del almacén temporal
+    if (state.capturedCredIndexToSave !== null && state.capturedCredIndexToSave !== undefined) {
+        await discardCapturedCredentialByIndex(state.capturedCredIndexToSave);
+        state.capturedCredIndexToSave = null;
+    }
+    
     closePasswordModal();
     notify('Contraseña guardada', 'success');
     pwLoad();
@@ -3068,6 +4115,109 @@ async function deletePassword(id) {
         pwLoad();
     });
 }
+
+function checkCapturedCredentials() {
+    const container = document.getElementById('pw-captured-container');
+    if (!container) return;
+
+    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+        chrome.storage.local.get(['captured_credentials'], (result) => {
+            const list = result.captured_credentials || [];
+            if (list.length === 0) {
+                container.innerHTML = '';
+                return;
+            }
+
+            // Filtrar las que ya están almacenadas en state.passwords para no mostrarlas
+            const filteredList = list.filter(cred => {
+                const alreadyStored = (state.passwords || []).some(p => {
+                    const matchUser = p.username === cred.username;
+                    const matchPass = p.password === cred.password;
+                    const cleanDomain = (cred.domain || '').toLowerCase().trim();
+                    const matchSite = (p.site || '').toLowerCase().includes(cleanDomain) ||
+                                      (p.url || '').toLowerCase().includes(cleanDomain);
+                    return matchUser && matchPass && matchSite;
+                });
+                return !alreadyStored;
+            });
+
+            if (filteredList.length === 0) {
+                container.innerHTML = '';
+            } else {
+                renderCapturedCredentials(filteredList);
+            }
+        });
+    }
+}
+
+function renderCapturedCredentials(list) {
+    const container = document.getElementById('pw-captured-container');
+    if (!container) return;
+
+    container.innerHTML = list.map((cred, idx) => `
+        <div class="captured-cred-banner" style="background: rgba(108, 92, 231, 0.08); border: 1px dashed rgba(108, 92, 231, 0.4); border-radius: 10px; padding: 12px 16px; margin-bottom: 16px; display: flex; align-items: center; justify-content: space-between; gap: 16px; animation: fadeIn 0.3s ease;">
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <span style="font-size: 1.4rem;">🔑</span>
+                <div>
+                    <div style="font-weight: 600; font-size: 0.92rem; color: var(--ag-text);">Nueva contraseña detectada en <span style="color: var(--ag-accent); font-weight: 700;">${escapeHtml(cred.domain)}</span></div>
+                    <div style="font-size: 0.82rem; color: var(--ag-text-muted);">Usuario: <strong>${escapeHtml(cred.username)}</strong></div>
+                </div>
+            </div>
+            <div style="display: flex; gap: 8px; flex-shrink: 0;">
+                <button class="ag-btn ag-btn-primary" style="padding: 6px 12px; font-size: 0.8rem; font-weight: 600;" data-action="saveCapturedCred" data-idx="${idx}">Guardar</button>
+                <button class="ag-btn" style="padding: 6px 12px; font-size: 0.8rem; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.08);" data-action="discardCapturedCred" data-idx="${idx}">Descartar</button>
+            </div>
+        </div>
+    `).join('');
+}
+
+async function discardCapturedCredentialByIndex(index) {
+    return new Promise((resolve) => {
+        if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+            chrome.storage.local.get(['captured_credentials'], (result) => {
+                let list = result.captured_credentials || [];
+                list.splice(index, 1);
+                chrome.storage.local.set({ captured_credentials: list }, () => {
+                    checkCapturedCredentials();
+                    resolve();
+                });
+            });
+        } else {
+            resolve();
+        }
+    });
+}
+
+window.saveCapturedCred = function(idx) {
+    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+        chrome.storage.local.get(['captured_credentials'], (result) => {
+            const list = result.captured_credentials || [];
+            const cred = list[idx];
+            if (!cred) return;
+
+            state.capturedCredIndexToSave = idx;
+            
+            // Abrir el modal precargando los campos
+            openPasswordModal({
+                id: null,
+                site: cred.domain,
+                url: 'https://' + cred.domain,
+                username: cred.username,
+                password: cred.password,
+                type: 'web',
+                notes: 'Capturada automáticamente'
+            });
+        });
+    }
+};
+
+window.discardCapturedCred = async function(idx) {
+    await discardCapturedCredentialByIndex(idx);
+    notify('Sugerencia descartada', 'info');
+};
+
+window.checkCapturedCredentials = checkCapturedCredentials;
+
 
 function generatePassword(length) {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$%*+-?';

@@ -3,6 +3,7 @@
 /browser_data.db
 /memory_screenshots
 /web_cache
+/installed_extensions/.runtime
 /.venv/
 
 # IA Context

@@ -11,6 +11,7 @@ from PyQt6.QtCore import QUrl, QObject, pyqtSlot, pyqtSignal, QStandardPaths, QB
 from PyQt6.QtGui import QImage
 from secure_store import encrypt, decrypt
 import google_sync
+import organizer_sync
 import native_video
 from db import _db, cleanup_original_screenshot, get_screenshots_dir, save_screenshot
 
@@ -22,11 +23,25 @@ def _clean_dir(path):
     path = os.path.abspath(os.path.expanduser(str(path)))
     return re.sub(r'^/{2,}', '/', path)
 
+def _int_ids(values):
+    """IDs enteros desde una lista de JS (llegan como int, float o texto)."""
+    out = []
+    for v in values or []:
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            continue
+        if f.is_integer():
+            out.append(int(f))
+    return out
+
+
 # ─── Puente Agenda (Python <=> JS) ───────────────────────────────────────────
 class AgendaBridge(QObject):
 
     updated = pyqtSignal()
     google_changed = pyqtSignal()  # estado o datos de Google Calendar cambiaron
+    organizer_sync_done = pyqtSignal(str)  # resultado de sincronizar con Drive (JSON)
     video_event = pyqtSignal(str)  # eventos del reproductor nativo (JSON)
     video_thumbnail_ready = pyqtSignal(str, str)  # (url, data URL JPEG o "")
 
@@ -37,6 +52,10 @@ class AgendaBridge(QObject):
     def __init__(self, parent=None):
         super().__init__(parent)
         google_sync.manager().changed.connect(self.google_changed)
+        sync = organizer_sync.manager()
+        sync.finished.connect(lambda res: self.organizer_sync_done.emit(json.dumps(res)))
+        # Cualquier cambio hecho desde la página se sube a Drive al poco tiempo.
+        self.updated.connect(sync.schedule)
         self._native_player = None
 
     # ─── Google Calendar (google_sync.py) ─────────────────────────────────────
@@ -67,6 +86,22 @@ class AgendaBridge(QObject):
     @pyqtSlot()
     def google_disconnect(self):
         google_sync.manager().disconnect()
+
+    @pyqtSlot(result=str)
+    def google_get_token(self):
+        tok = google_sync.manager().get_access_token()
+        return tok or ""
+
+    # ─── Organizador ⇄ Google Drive (organizer_sync.py) ───────────────────────
+    @pyqtSlot(bool, int)
+    def organizer_drive_sync(self, prefer_drive, req_id):
+        organizer_sync.manager().request(prefer_drive, req_id)
+
+    @pyqtSlot(result=str)
+    def organizer_drive_status(self):
+        from db import get_config
+        last = get_config(organizer_sync.LAST_SYNC_KEY, "")
+        return json.dumps({"connected": organizer_sync.manager().connected(), "lastSync": int(float(last)) if last else 0})
 
     @pyqtSlot(result=str)
     def get_google_events(self):
@@ -114,17 +149,24 @@ class AgendaBridge(QObject):
 
     @pyqtSlot(result=list)
     def get_shopping(self):
-        c = _db(); res = c.execute("SELECT id, text, value, currency, dueDate, paymentMethod, done, COALESCE(notes,'') FROM shopping ORDER BY id DESC").fetchall(); c.close()
-        return [{"id":r[0],"text":r[1],"value":r[2],"currency":r[3],"dueDate":r[4],"paymentMethod":r[5],"done":bool(r[6]),"notes":r[7]} for r in res]
+        c = _db(); res = c.execute("SELECT id, text, value, currency, dueDate, paymentMethod, done, COALESCE(notes,''), COALESCE(category,'Otros'), COALESCE(status,'projected') FROM shopping ORDER BY id DESC").fetchall(); c.close()
+        return [{"id":r[0],"text":r[1],"value":r[2],"currency":r[3],"dueDate":r[4],"paymentMethod":r[5],"done":bool(r[6]),"notes":r[7],"category":r[8],"status":r[9]} for r in res]
 
+    # La página manda categoría y estado (Presupuesto); los llamadores viejos, no.
     @pyqtSlot(str, float, str, str, str)
-    def add_shopping(self, text, val, cur, date, pm):
-        c = _db(); c.execute("INSERT INTO shopping(text, value, currency, dueDate, paymentMethod) VALUES(?,?,?,?,?)", (text, val, cur, date, pm)); c.commit(); c.close()
+    @pyqtSlot(str, float, str, str, str, str)
+    @pyqtSlot(str, float, str, str, str, str, str)
+    def add_shopping(self, text, val, cur, date, pm, category="Otros", status="projected"):
+        c = _db(); c.execute("INSERT INTO shopping(text, value, currency, dueDate, paymentMethod, category, status) VALUES(?,?,?,?,?,?,?)",
+                             (text, val, cur, date, pm, category or "Otros", status or "projected")); c.commit(); c.close()
         self.updated.emit()
 
     @pyqtSlot(int, str, float, str, str, str)
-    def update_shopping(self, sid, text, val, cur, date, pm):
-        c = _db(); c.execute("UPDATE shopping SET text=?, value=?, currency=?, dueDate=?, paymentMethod=? WHERE id=?", (text, val, cur, date, pm, sid)); c.commit(); c.close()
+    @pyqtSlot(int, str, float, str, str, str, str)
+    @pyqtSlot(int, str, float, str, str, str, str, str)
+    def update_shopping(self, sid, text, val, cur, date, pm, category=None, status=None):
+        c = _db(); c.execute("UPDATE shopping SET text=?, value=?, currency=?, dueDate=?, paymentMethod=?, category=COALESCE(?, category), status=COALESCE(?, status) WHERE id=?",
+                             (text, val, cur, date, pm, category, status, sid)); c.commit(); c.close()
         self.updated.emit()
 
     @pyqtSlot(int)
@@ -140,12 +182,15 @@ class AgendaBridge(QObject):
 
     @pyqtSlot(result=list)
     def get_income(self):
-        c = _db(); res = c.execute("SELECT id, text, value, currency, dueDate, received, COALESCE(notes,'') FROM income ORDER BY id DESC").fetchall(); c.close()
-        return [{"id":r[0],"text":r[1],"value":r[2],"currency":r[3],"dueDate":r[4],"received":bool(r[5]),"notes":r[6]} for r in res]
+        c = _db(); res = c.execute("SELECT id, text, value, currency, dueDate, received, COALESCE(notes,''), COALESCE(category,'Otros'), COALESCE(status,'projected') FROM income ORDER BY id DESC").fetchall(); c.close()
+        return [{"id":r[0],"text":r[1],"value":r[2],"currency":r[3],"dueDate":r[4],"received":bool(r[5]),"notes":r[6],"category":r[7],"status":r[8]} for r in res]
 
     @pyqtSlot(str, float, str, str)
-    def add_income(self, text, val, cur, date):
-        c = _db(); c.execute("INSERT INTO income(text, value, currency, dueDate) VALUES(?,?,?,?)", (text, val, cur, date)); c.commit(); c.close()
+    @pyqtSlot(str, float, str, str, str)
+    @pyqtSlot(str, float, str, str, str, str)
+    def add_income(self, text, val, cur, date, category="Otros", status="projected"):
+        c = _db(); c.execute("INSERT INTO income(text, value, currency, dueDate, category, status) VALUES(?,?,?,?,?,?)",
+                             (text, val, cur, date, category or "Otros", status or "projected")); c.commit(); c.close()
         self.updated.emit()
 
     @pyqtSlot(int, bool)
@@ -154,8 +199,11 @@ class AgendaBridge(QObject):
         self.updated.emit()
 
     @pyqtSlot(int, str, float, str, str)
-    def update_income(self, iid, text, val, cur, date):
-        c = _db(); c.execute("UPDATE income SET text=?, value=?, currency=?, dueDate=? WHERE id=?", (text, val, cur, date, iid)); c.commit(); c.close()
+    @pyqtSlot(int, str, float, str, str, str)
+    @pyqtSlot(int, str, float, str, str, str, str)
+    def update_income(self, iid, text, val, cur, date, category=None, status=None):
+        c = _db(); c.execute("UPDATE income SET text=?, value=?, currency=?, dueDate=?, category=COALESCE(?, category), status=COALESCE(?, status) WHERE id=?",
+                             (text, val, cur, date, category, status, iid)); c.commit(); c.close()
         self.updated.emit()
 
     @pyqtSlot(int)
@@ -180,6 +228,66 @@ class AgendaBridge(QObject):
             val = _clean_dir(val)
         c = _db(); c.execute("INSERT OR REPLACE INTO app_config(key,val) VALUES(?,?)", (key, val)); c.commit(); c.close()
         self.updated.emit()
+
+    # ─── Deudas y Ahorros (JSON en app_config, mismas claves que el respaldo del Organizer) ──
+    def _get_json_config(self, key, default):
+        raw = self.get_config(key)
+        try:
+            val = json.loads(raw) if raw else default
+        except ValueError:
+            return default
+        return val if isinstance(val, type(default)) else default
+
+    def _set_json_config(self, key, val):
+        c = _db(); c.execute("INSERT OR REPLACE INTO app_config(key,val) VALUES(?,?)", (key, json.dumps(val, ensure_ascii=False))); c.commit(); c.close()
+        self.updated.emit()
+
+    @pyqtSlot(result=list)
+    def get_debts(self):
+        return self._get_json_config("deudas_list", [])
+
+    @pyqtSlot(list)
+    def save_debts(self, items):
+        self._set_json_config("deudas_list", list(items or []))
+
+    @pyqtSlot(result=float)
+    def get_debts_budget(self):
+        try:
+            return float(self.get_config("deudas_presupuesto") or 0)
+        except ValueError:
+            return 0.0
+
+    @pyqtSlot('QVariant')
+    def save_debts_budget(self, amount):
+        try:
+            amount = float(amount or 0)
+        except (TypeError, ValueError):
+            amount = 0.0
+        c = _db(); c.execute("INSERT OR REPLACE INTO app_config(key,val) VALUES(?,?)", ("deudas_presupuesto", str(amount))); c.commit(); c.close()
+        self.updated.emit()
+
+    @pyqtSlot(result=list)
+    def get_savings(self):
+        return self._get_json_config("savings_goals", [])
+
+    @pyqtSlot(list)
+    def save_savings(self, items):
+        self._set_json_config("savings_goals", list(items or []))
+
+    # ─── Borrado en lote (Agenda "Limpiar hechas", Kanban "Hechos") ──────────
+    @pyqtSlot(list)
+    def delete_agenda_batch(self, ids):
+        ids = _int_ids(ids)
+        if ids:
+            c = _db(); c.executemany("DELETE FROM agenda WHERE id=?", [(i,) for i in ids]); c.commit(); c.close()
+            self.updated.emit()
+
+    @pyqtSlot(list)
+    def delete_kanban_card_batch(self, ids):
+        ids = _int_ids(ids)
+        if ids:
+            c = _db(); c.executemany("DELETE FROM kanban_cards WHERE id=?", [(i,) for i in ids]); c.commit(); c.close()
+            self.updated.emit()
 
     # ─── API de Videos (Sistema de archivos y yt-dlp) ─────────────────────────
     @pyqtSlot(result=str)
@@ -1012,9 +1120,15 @@ class AgendaBridge(QObject):
         c = _db(); res = c.execute("SELECT id, title, pos FROM kanban_cols ORDER BY pos ASC").fetchall(); c.close()
         return [{"id":r[0],"title":r[1],"pos":r[2]} for r in res]
 
+    @pyqtSlot(result=list)
     @pyqtSlot(int, result=list)
-    def get_kanban_cards(self, col_id):
-        c = _db(); res = c.execute("SELECT id, col_id, text, pos FROM kanban_cards WHERE col_id=? ORDER BY pos ASC", (col_id,)).fetchall(); c.close()
+    def get_kanban_cards(self, col_id=None):
+        c = _db()
+        if col_id is None:
+            res = c.execute("SELECT id, col_id, text, pos FROM kanban_cards ORDER BY pos ASC").fetchall()
+        else:
+            res = c.execute("SELECT id, col_id, text, pos FROM kanban_cards WHERE col_id=? ORDER BY pos ASC", (col_id,)).fetchall()
+        c.close()
         return [{"id":r[0],"col_id":r[1],"text":r[2],"pos":r[3]} for r in res]
 
     @pyqtSlot(str, int)

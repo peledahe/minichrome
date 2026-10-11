@@ -74,7 +74,13 @@ def _db():
     income_cols = {row[1] for row in c.execute("PRAGMA table_info(income)").fetchall()}
     if 'notes' not in income_cols:
         c.execute("ALTER TABLE income ADD COLUMN notes TEXT DEFAULT ''")
-    
+    # Categoría y estado del Presupuesto (mismo formato que Mk Organizer)
+    for table, cols in (("shopping", shopping_cols), ("income", income_cols)):
+        if 'category' not in cols:
+            c.execute(f"ALTER TABLE {table} ADD COLUMN category TEXT DEFAULT 'Otros'")
+        if 'status' not in cols:
+            c.execute(f"ALTER TABLE {table} ADD COLUMN status TEXT DEFAULT 'projected'")
+
     # Inicializar config por defecto si está vacía
     if not c.execute("SELECT key FROM app_config LIMIT 1").fetchone():
         defaults = [('exchangeRate', '7.80'), ('paymentMethods', '["Efectivo","Tarjeta","Transferencia"]')]

@@ -62,5 +62,13 @@
   {
     "name": "Campus",
     "url": "https://campus.merke.net/"
+  },
+  {
+    "name": "WAapi",
+    "url": "https://waapi.merke.net/"
+  },
+  {
+    "name": "waapi",
+    "url": "https://waapi.merke.net/"
   }
 ]

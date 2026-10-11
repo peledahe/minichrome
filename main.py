@@ -11,7 +11,7 @@ from secure_store import encrypt_legacy_passwords
 # ─── Arranque ─────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     os.environ.setdefault("QTWEBENGINE_CHROMIUM_FLAGS",
-                          "--enable-features=WebRTCPipeWireCapturer")
+                          "--enable-features=WebRTCPipeWireCapturer --allow-file-access-from-files --disable-web-security")
     if os.path.isdir(DICTIONARIES_DIR):
         os.environ.setdefault("QTWEBENGINE_DICTIONARIES_PATH", DICTIONARIES_DIR)
     app = QApplication(sys.argv)
