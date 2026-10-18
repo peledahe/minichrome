@@ -14,6 +14,58 @@
 (function () {
     'use strict';
     var g = typeof globalThis !== 'undefined' ? globalThis : self;
+    if (g.addEventListener) {
+        g.addEventListener('error', function (e) {
+            console.error('[UNCAUGHT ERROR]', e.message, e.filename, e.lineno, e.error);
+        });
+        g.addEventListener('unhandledrejection', function (e) {
+            console.error('[UNHANDLED REJECTION]', e.reason && (e.reason.stack || e.reason.message) || e.reason);
+        });
+    }
+
+    // Mock seguro de DOM para Service Workers migrados de MV2 que llaman a document.*
+    if (typeof document === 'undefined') {
+        var dummyElement = function () {
+            return {
+                style: {},
+                dataset: {},
+                classList: { add: function () {}, remove: function () {}, toggle: function () {}, contains: function () { return false; } },
+                setAttribute: function () {},
+                getAttribute: function () { return ''; },
+                removeAttribute: function () {},
+                addEventListener: function (evt, fn) { if (evt === 'load') setTimeout(fn, 10); },
+                removeEventListener: function () {},
+                appendChild: function (c) { return c; },
+                removeChild: function (c) { return c; },
+                replaceWith: function () {},
+                querySelector: function () { return null; },
+                querySelectorAll: function () { return []; },
+                width: 16, height: 16,
+                set src(v) { this._src = v; },
+                get src() { return this._src || ''; }
+            };
+        };
+        g.document = {
+            createElement: dummyElement,
+            createElementNS: dummyElement,
+            createDocumentFragment: dummyElement,
+            getElementById: function () { return null; },
+            querySelector: function () { return null; },
+            querySelectorAll: function () { return []; },
+            head: dummyElement(),
+            body: dummyElement(),
+            documentElement: dummyElement(),
+            addEventListener: function () {},
+            removeEventListener: function () {}
+        };
+    } else {
+        // En ventanas/popups, evitar que verificaciones de visibilidad bloqueen el renderizado
+        try {
+            Object.defineProperty(document, 'hidden', { get: function () { return false; }, configurable: true });
+            Object.defineProperty(document, 'visibilityState', { get: function () { return 'visible'; }, configurable: true });
+        } catch (e) {}
+    }
+
     if (g.__minichromeShim || typeof chrome === 'undefined' || !chrome.runtime) return;
     g.__minichromeShim = true;
 
@@ -51,8 +103,12 @@
         };
     }
     function setProp(obj, key, value) {
-        try { Object.defineProperty(obj, key, { value: value, configurable: true, writable: true, enumerable: true }); }
-        catch (e) { try { obj[key] = value; } catch (e2) { /* propiedad bloqueada */ } }
+        try { obj[key] = value; if (obj[key] === value) return; } catch (e) {}
+        try { Object.defineProperty(obj, key, { value: value, configurable: true, writable: true, enumerable: true }); return; } catch (e) {}
+        try {
+            var proto = Object.getPrototypeOf(obj);
+            if (proto) Object.defineProperty(proto, key, { value: value, configurable: true, writable: true, enumerable: true });
+        } catch (e) {}
     }
     function ns(name) {
         if (!chrome[name]) setProp(chrome, name, {});
@@ -64,15 +120,23 @@
         });
     }
 
-    // ── Puente con Minichrome (solo existe en el popup) ──────────────────────
+    // ── Puente con Minichrome ────────────────────────────────────────────────
+    // mcext solo existe en el popup; mcmedia (reproductor nativo) en cualquier
+    // página de extensión. El shim es el único que abre el QWebChannel: el
+    // código de la extensión usa los objetos con `await minichrome.objects`.
     var bridge = null;
-    var bridgeReady = new Promise(function (resolve) {
+    var channelObjects = new Promise(function (resolve) {
         if (typeof QWebChannel === 'undefined' || typeof qt === 'undefined' || !qt.webChannelTransport) {
             resolve(null);
             return;
         }
-        new QWebChannel(qt.webChannelTransport, function (channel) {
-            bridge = channel.objects.mcext || null;
+        new QWebChannel(qt.webChannelTransport, function (channel) { resolve(channel.objects); });
+        setTimeout(function () { resolve(null); }, 2000);
+    });
+    if (typeof window !== 'undefined') g.minichrome = { objects: channelObjects };
+    var bridgeReady = new Promise(function (resolve) {
+        channelObjects.then(function (objects) {
+            bridge = objects && objects.mcext || null;
             if (bridge) {
                 bridge.scriptResult.connect(function (reqId, json) {
                     var p = pending[reqId];
@@ -84,7 +148,6 @@
             }
             resolve(bridge);
         });
-        setTimeout(function () { resolve(null); }, 2000);
     });
     var pending = {};
     var reqSeq = 0;
@@ -114,8 +177,75 @@
         return bridgeReady.then(function (b) {
             if (b) b.openTab(url);
             else if (typeof clients !== 'undefined' && clients.openWindow) return clients.openWindow(url).catch(function () {});
-            else g.open(url, '_blank');
+            else if (typeof g.open === 'function') g.open(url, '_blank');
         });
+    }
+
+    // ── iframes que el sitio no deja incrustar ───────────────────────────────
+    // En Chrome la extensión quita X-Frame-Options/frame-ancestors con
+    // declarativeNetRequest (Black Menu: Gemini, Gmail, Calendar…). QtWebEngine
+    // no puede; WebPage.javaScriptConsoleMessage detecta el rechazo y llama a
+    // esta función, que tapa el iframe con un acceso para abrirlo en una pestaña.
+    if (typeof document !== 'undefined' && document.createElement) {
+        var siteOf = function (host) { return host.split('.').slice(-2).join('.'); };
+        var cleanFrameUrl = function (src) {
+            try {
+                var u = new URL(src);
+                Array.from(u.searchParams.keys()).forEach(function (k) {
+                    if (/^bm_/.test(k)) u.searchParams.delete(k); // parámetros internos de Black Menu
+                });
+                return u.href;
+            } catch (e) { return src; }
+        };
+        var restoreFrame = function (frame) {
+            if (frame.__mcBlocked) {
+                frame.__mcBlocked.replaceWith(frame);
+                frame.__mcBlocked = null;
+            }
+        };
+        var coverFrame = function (frame) {
+            if (frame.__mcBlocked) return;
+            var url = cleanFrameUrl(frame.src);
+            var box = document.createElement('div');
+            box.className = frame.className;
+            box.style.cssText = 'flex:1 1 auto;align-self:stretch;width:100%;height:100%;min-height:160px;' +
+                'display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;' +
+                'padding:24px;box-sizing:border-box;text-align:center;font:13px/1.5 sans-serif;color:inherit;';
+            var msg = document.createElement('div');
+            msg.textContent = new URL(url).host + ' no permite mostrarse dentro de la extensión en Minichrome.';
+            msg.style.opacity = '0.75';
+            var btn = document.createElement('button');
+            btn.type = 'button';
+            btn.textContent = 'Abrir en una pestaña';
+            btn.style.cssText = 'padding:8px 18px;border:none;border-radius:8px;cursor:pointer;' +
+                'background:#1a73e8;color:#fff;font:600 13px sans-serif;';
+            btn.addEventListener('click', function () { openUrl(url); });
+            box.appendChild(msg);
+            box.appendChild(btn);
+            // Se saca del documento (no basta con ocultarlo: el frame rechazado
+            // seguía vivo y QtWebEngine caía con otra pestaña del mismo sitio).
+            frame.replaceWith(box);
+            frame.__mcBlocked = box;
+            // La extensión suele reutilizar el iframe para otro servicio: al
+            // cambiar de src vuelve a su sitio y se intenta de nuevo.
+            new MutationObserver(function (_m, obs) { obs.disconnect(); restoreFrame(frame); })
+                .observe(frame, { attributes: true, attributeFilter: ['src'] });
+        };
+        g.__minichromeFrameBlocked = function (blockedUrl) {
+            var blocked;
+            try { blocked = new URL(blockedUrl); } catch (e) { return; }
+            var frames = Array.prototype.filter.call(document.querySelectorAll('iframe'), function (f) {
+                return /^https?:/.test(f.src || '');
+            });
+            // La URL rechazada puede ser la de una redirección (inicio de sesión,
+            // consentimiento): primero el mismo origen, luego el mismo sitio.
+            var match = frames.filter(function (f) { return new URL(f.src).origin === blocked.origin; });
+            if (!match.length) {
+                match = frames.filter(function (f) { return siteOf(new URL(f.src).hostname) === siteOf(blocked.hostname); });
+            }
+            if (!match.length && frames.length === 1) match = frames;
+            match.forEach(coverFrame);
+        };
     }
 
     // ── storage: sync y managed ──────────────────────────────────────────────
@@ -210,6 +340,18 @@
             if (!page) throw new Error('La extensión no tiene página de opciones');
             return openUrl(chrome.runtime.getURL(page));
         }),
+        getPlatformInfo: api(function () {
+            return { os: 'linux', arch: 'x86-64', nacl_arch: 'x86-64' };
+        }),
+        ContextType: {
+            BACKGROUND: 'BACKGROUND',
+            POPUP: 'POPUP',
+            SIDE_PANEL: 'SIDE_PANEL',
+            TAB: 'TAB',
+            OFFSCREEN_DOCUMENT: 'OFFSCREEN_DOCUMENT'
+        },
+        getContexts: api(function () { return []; }),
+        onMessageExternal: makeEvent(),
         onStartup: makeEvent(),
         onInstalled: makeEvent(),
         onSuspend: makeEvent(),
@@ -312,7 +454,8 @@
     fill(ns('sidePanel'), {
         open: fail('El panel lateral no está disponible en Minichrome'),
         setOptions: ok(undefined), getOptions: ok({ enabled: false }),
-        setPanelBehavior: ok(undefined), getPanelBehavior: ok({ openPanelOnActionClick: false })
+        setPanelBehavior: ok(undefined), getPanelBehavior: ok({ openPanelOnActionClick: false }),
+        onOpened: makeEvent()
     });
 
     fill(ns('notifications'), {
@@ -340,5 +483,33 @@
         launchWebAuthFlow: fail('chrome.identity.launchWebAuthFlow no está disponible en Minichrome'),
         getProfileUserInfo: ok({ email: '', id: '' }),
         onSignInChanged: makeEvent()
+    });
+
+    // ── extension: compatibilidad histórica MV2/MV3 (getViews, getURL…) ──────
+    var extApi = ns('extension');
+    fill(extApi, {
+        getViews: function (fetchProperties) {
+            if (typeof window !== 'undefined') return [window];
+            return [];
+        },
+        getBackgroundPage: function () { return null; },
+        isAllowedIncognitoAccess: ok(false),
+        isAllowedFileSchemeAccess: ok(false),
+        inIncognitoContext: false,
+        getURL: function (path) { return chrome.runtime.getURL(path); },
+        onRequest: makeEvent(),
+        onRequestExternal: makeEvent(),
+        sendRequest: ok(undefined)
+    });
+
+    // ── declarativeNetRequest: reglas de red ─────────────────────────────────
+    var dnr = ns('declarativeNetRequest');
+    fill(dnr, {
+        getDynamicRules: ok([]),
+        updateDynamicRules: ok(undefined),
+        getSessionRules: ok([]),
+        updateSessionRules: ok(undefined),
+        getEnabledRulesets: ok([]),
+        updateEnabledRulesets: ok(undefined)
     });
 })();

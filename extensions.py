@@ -36,6 +36,8 @@ SHIM_SRC = os.path.join(UI_DIR, "extension_shim.js")
 # Chromium reserva los nombres que empiezan con "_" dentro de una extensión.
 SHIM_NAME = "minichrome-shim.js"
 SW_WRAPPER_NAME = "minichrome-sw.js"
+# qwebchannel.js copiado dentro de la extensión: su CSP (script-src 'self') no deja cargar qrc:.
+CHANNEL_NAME = "minichrome-qwebchannel.js"
 
 
 # ─── Descarga / paquetes .crx ─────────────────────────────────────────────────
@@ -155,8 +157,16 @@ def _runtime_dir_for(ext_id: str) -> str:
     return os.path.join(RUNTIME_DIR, re.sub(r"[^A-Za-z0-9_.-]", "_", ext_id))
 
 
-def _inject_shim_html(html: str) -> str:
-    tag = f'<script src="/{SHIM_NAME}"></script>'
+def _inject_shim_html(html: str, rel_prefix: str = "") -> str:
+    # Quitar restricciones de integridad (SRI) y meta tags CSP que bloquean la ejecución local
+    html = re.sub(r'\s*integrity="[^"]*"', '', html, flags=re.IGNORECASE)
+    html = re.sub(r'<meta\s+[^>]*http-equiv=["\']?Content-Security-Policy["\']?[^>]*>', '', html, flags=re.IGNORECASE)
+    if rel_prefix:
+        # Convertir rutas locales absolutas tipo src="/scripts/..." a relativas tipo src="../scripts/..."
+        html = re.sub(r'(src|href)=["\']/(?!/)([^"\']+)["\']', rf'\1="{rel_prefix}\2"', html, flags=re.IGNORECASE)
+    base = rel_prefix or "/"
+    # qwebchannel.js antes que el shim: el shim abre el canal (mcext, mcmedia).
+    tag = f'<script src="{base}{CHANNEL_NAME}"></script><script src="{base}{SHIM_NAME}"></script>'
     for pattern in (r"<head\b[^>]*>", r"<html\b[^>]*>"):
         m = re.search(pattern, html, re.IGNORECASE)
         if m:
@@ -175,35 +185,59 @@ def stage_extension(src_dir: str, ext_id: str) -> str:
     shutil.copytree(src_dir, dest, symlinks=False,
                     ignore=shutil.ignore_patterns(".git", "node_modules", "_metadata", ".runtime"))
     shutil.copyfile(SHIM_SRC, os.path.join(dest, SHIM_NAME))
+    with open(os.path.join(dest, CHANNEL_NAME), "w", encoding="utf-8") as f:
+        f.write(_qwebchannel_js())
 
     mf_path = os.path.join(dest, "manifest.json")
     with open(mf_path, "r", encoding="utf-8-sig") as f:
         mf = json.load(f)
 
+    # Las CSPs muy restrictivas (como en Black Menu o G App Launcher con worker-src 'none'
+    # o default-src 'none') bloquean el registro del Service Worker (status code 2) y
+    # la carga de recursos locales en QtWebEngine. Se retira para aplicar la CSP estándar MV3.
+    if "content_security_policy" in mf:
+        del mf["content_security_policy"]
+
+    # Filtrar permisos incompatibles o que causan fallos en QtWebEngine: con
+    # declarativeNetRequest nativo, updateSessionRules tumba el navegador (segfault
+    # en Qt 6.11); sin el permiso la extensión usa los stubs del shim.
+    bad_perms = {"declarativeNetRequest", "declarativeNetRequestWithHostAccess",
+                 "webRequestBlocking", "webRequest"}
+    if "permissions" in mf and isinstance(mf["permissions"], list):
+        mf["permissions"] = [p for p in mf["permissions"] if p not in bad_perms]
+    if "optional_permissions" in mf and isinstance(mf["optional_permissions"], list):
+        mf["optional_permissions"] = [p for p in mf["optional_permissions"] if p not in bad_perms]
+
     bg = mf.get("background") or {}
     sw = bg.get("service_worker")
     if sw:
-        sw_url = "/" + sw.lstrip("/")
+        sw_file = sw.lstrip("/")
         if bg.get("type") == "module":
-            wrapper = f'import "/{SHIM_NAME}";\nimport {json.dumps(sw_url)};\n'
+            wrapper = f'import "./{SHIM_NAME}";\nimport "./{sw_file}";\n'
         else:
-            wrapper = f'importScripts("/{SHIM_NAME}", {json.dumps(sw_url)});\n'
+            wrapper = (
+                f'try {{ importScripts("{SHIM_NAME}"); }} catch(e) {{ console.error("[SW] shim error:", e); }}\n'
+                f'try {{ importScripts("{sw_file}"); }} catch(e) {{ console.error("[SW] bg error:", e); }}\n'
+            )
         with open(os.path.join(dest, SW_WRAPPER_NAME), "w", encoding="utf-8") as f:
             f.write(wrapper)
         bg["service_worker"] = SW_WRAPPER_NAME
-        with open(mf_path, "w", encoding="utf-8") as f:
-            json.dump(mf, f, ensure_ascii=False, indent=2)
+
+    with open(mf_path, "w", encoding="utf-8") as f:
+        json.dump(mf, f, ensure_ascii=False, indent=2)
 
     for root, _dirs, files in os.walk(dest):
         for name in files:
             if not name.lower().endswith((".html", ".htm")):
                 continue
             path = os.path.join(root, name)
+            rel_dir = os.path.relpath(dest, root)
+            rel_prefix = "" if rel_dir == "." else (rel_dir.replace("\\", "/") + "/")
             try:
                 with open(path, "r", encoding="utf-8", errors="surrogateescape") as f:
                     html = f.read()
                 with open(path, "w", encoding="utf-8", errors="surrogateescape") as f:
-                    f.write(_inject_shim_html(html))
+                    f.write(_inject_shim_html(html, rel_prefix))
             except OSError:
                 pass
     return dest
@@ -284,16 +318,28 @@ class ChromeExtension:
         def pick(icons):
             if isinstance(icons, str):
                 icons = {"0": icons}
+            if isinstance(icons, list):
+                for item in icons:
+                    res = pick(item)
+                    if res:
+                        return res
+                return ""
             if not isinstance(icons, dict):
                 return ""
-            for size in sorted(icons, key=lambda s: -int(s) if s.isdigit() else 0):
-                cand = os.path.join(self.path, icons[size])
-                if os.path.exists(cand):
-                    return cand
+            for size in sorted(icons, key=lambda s: -int(s) if str(s).isdigit() else 0):
+                val = icons[size]
+                if isinstance(val, str):
+                    cand = os.path.join(self.path, val.lstrip("/"))
+                    if os.path.exists(cand):
+                        return cand
             return ""
 
         action = self.manifest.get("action") or self.manifest.get("browser_action") or {}
-        return pick(self.manifest.get("icons")) or pick(action.get("default_icon")) or ""
+        return (pick(self.manifest.get("icons")) or
+                pick(action.get("default_icon")) or
+                pick(action.get("icon_variants")) or
+                pick(action.get("theme_icons")) or "")
+
 
     def _resolve_action_popup(self) -> str:
         action = self.manifest.get("action") or self.manifest.get("browser_action") or {}
@@ -313,12 +359,73 @@ class ChromeExtension:
         mf = self.manifest
         side = (mf.get("side_panel") or {}).get("default_path")
         options = (mf.get("options_ui") or {}).get("page") or mf.get("options_page")
-        stem = re.sub(r"[^a-z0-9]", "", (mf.get("short_name") or "").lower())
-        for name in [side, f"{stem}.html" if stem else None, "organizer.html", "index.html",
-                     "main.html", "app.html", "popup.html", options]:
+
+        # 1. Buscar en background / service worker si referencia algún archivo .html
+        bg = mf.get("background") or {}
+        bg_files = []
+        if isinstance(bg, dict):
+            sw = bg.get("service_worker")
+            if sw:
+                bg_files.append(sw)
+            for s in bg.get("scripts") or []:
+                bg_files.append(s)
+        for def_bg in ("background.js", "sw.js", "service-worker.js"):
+            if def_bg not in bg_files:
+                bg_files.append(def_bg)
+
+        for bf in bg_files:
+            bf_path = os.path.join(self.path, bf.lstrip("/"))
+            if os.path.exists(bf_path):
+                try:
+                    with open(bf_path, "r", encoding="utf-8", errors="ignore") as f:
+                        txt = f.read()
+                    matches = re.findall(r"['\"]([a-zA-Z0-9_\-\./]+\.html)['\"]", txt)
+                    for m in matches:
+                        clean_m = m.lstrip("/").split("?")[0].split("#")[0]
+                        if os.path.exists(os.path.join(self.path, clean_m)):
+                            return clean_m
+                except OSError:
+                    pass
+
+        # 2. Generar posibles nombres a partir de short_name y name (incluyendo sin prefijo 'mk')
+        short_name = (mf.get("short_name") or "").lower()
+        raw_name = (mf.get("name") or "").lower()
+        stems = []
+        for s in (short_name, raw_name):
+            if not s:
+                continue
+            stems.append(re.sub(r"[^a-z0-9]", "", s))
+            stems.append(re.sub(r"[^a-z0-9]", "", re.sub(r"^mk[-_ ]?", "", s)))
+            for word in re.split(r"[-_ ]+", s):
+                w = re.sub(r"[^a-z0-9]", "", word)
+                if w and len(w) > 3:
+                    stems.append(w)
+
+        candidates = [side] + [f"{s}.html" for s in stems if s] + [
+            "organizer.html", "index.html", "main.html", "app.html", "popup.html", options
+        ]
+        for name in candidates:
             if name and os.path.exists(os.path.join(self.path, name.lstrip("/"))):
                 return name.lstrip("/")
+
+        # 3. Si no coincide con ninguno, buscar cualquier .html en la raíz
+        try:
+            htmls = [f for f in os.listdir(self.path) if f.lower().endswith(".html")]
+            if htmls:
+                for s in stems:
+                    if not s:
+                        continue
+                    for h in htmls:
+                        if s in h.lower():
+                            return h
+                if options and os.path.basename(options) in htmls and len(htmls) > 1:
+                    htmls.remove(os.path.basename(options))
+                return htmls[0]
+        except OSError:
+            pass
+
         return ""
+
 
 
 # ─── Panel lateral────────────────────────────────────────────────────────────────

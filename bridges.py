@@ -13,7 +13,7 @@ from secure_store import encrypt, decrypt
 import google_sync
 import organizer_sync
 import native_video
-from db import _db, cleanup_original_screenshot, get_screenshots_dir, save_screenshot
+from db import _db, cleanup_original_screenshot, get_config, get_screenshots_dir, save_screenshot, set_config
 
 _PATH_KEYS = ('mediaPath', 'imageMediaPath', 'screenshotsPath')
 
@@ -1522,3 +1522,89 @@ class PasswordBridge(QObject):
     def delete_password(self, pid):
         c = _db(); c.execute("DELETE FROM passwords WHERE id=?", (pid,)); c.commit(); c.close()
         self.updated.emit()
+
+
+# ─── Reproductor nativo para páginas de extensiones (chrome-extension://) ────
+# Carpetas que el usuario concedió a cada extensión con la File System Access
+# API (showDirectoryPicker / requestPermission), por origen. La página solo
+# conoce sus handles; con esto se traducen a rutas para el reproductor nativo.
+_EXT_DIRS_KEY = "extFsDirs"
+
+
+def _granted_dirs() -> dict:
+    try:
+        data = json.loads(get_config(_EXT_DIRS_KEY, "{}"))
+    except ValueError:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def remember_granted_dir(origin: str, path: str):
+    """Recuerda una carpeta concedida a una extensión (llamado desde WebPage)."""
+    if not origin.startswith("chrome-extension://") or not os.path.isdir(path):
+        return
+    data = _granted_dirs()
+    dirs = data.setdefault(origin, [])
+    path = os.path.realpath(path)
+    if path not in dirs:
+        dirs.append(path)
+        set_config(_EXT_DIRS_KEY, json.dumps(data))
+
+
+class ExtensionMediaBridge(QObject):
+    """Objeto `mcmedia` de las páginas de extensiones: reproduce con NativeVideoPlayer
+    los videos que QtWebEngine no decodifica (H.264/H.265/AAC). Solo abre archivos
+    dentro de carpetas que el usuario concedió a esa misma extensión."""
+
+    video_event = pyqtSignal(str)  # mismos eventos JSON que AgendaBridge.video_event
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._native_player = None
+
+    def _resolve(self, root, rel_path):
+        """Ruta real de `rel_path` dentro de la carpeta concedida llamada `root`."""
+        url = self.parent().url()
+        if url.scheme() != "chrome-extension":
+            return ""
+        rel = str(rel_path or "").replace("\\", "/").lstrip("/")
+        for base in _granted_dirs().get(f"chrome-extension://{url.host()}", []):
+            if os.path.basename(base) != root:
+                continue
+            path = os.path.realpath(os.path.join(base, rel))
+            if os.path.commonpath([base, path]) == base and os.path.isfile(path):
+                return path
+        return ""
+
+    def _native(self):
+        if self._native_player is None:
+            self._native_player = native_video.NativeVideoPlayer(self.parent())
+            self._native_player.media_event.connect(self.video_event)
+        return self._native_player
+
+    @pyqtSlot(str, str, result=str)
+    def playback_mode(self, root, rel_path):
+        """"native", "web" o "" si el archivo no está en una carpeta concedida."""
+        path = self._resolve(root, rel_path)
+        return native_video.playback_mode(path) if path else ""
+
+    @pyqtSlot(str, str, float, bool, result=bool)
+    def play(self, root, rel_path, start, muted):
+        path = self._resolve(root, rel_path)
+        if not path:
+            return False
+        self._native().play(path, start, muted)
+        return True
+
+    @pyqtSlot(str)
+    def command(self, cmd):
+        if self._native_player is not None:
+            self._native_player.command(cmd)
+
+    @pyqtSlot(str)
+    def layout(self, data):
+        if self._native_player is not None:
+            try:
+                self._native_player.set_layout(json.loads(data))
+            except (ValueError, TypeError, KeyError):
+                pass

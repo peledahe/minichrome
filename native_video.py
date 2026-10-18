@@ -15,7 +15,7 @@ import os
 import shutil
 import subprocess
 
-from PyQt6.QtCore import Q_ARG, QMetaObject, QRect, Qt, QUrl, pyqtSignal
+from PyQt6.QtCore import Q_ARG, QMetaObject, QRect, Qt, QTimer, QUrl, pyqtSignal
 from PyQt6.QtGui import QColor, QRegion
 from PyQt6.QtQuickWidgets import QQuickWidget
 
@@ -107,6 +107,12 @@ class NativeVideoPlayer(QQuickWidget):
             raise RuntimeError("; ".join(e.toString() for e in self.errors()))
         self._root.mediaEvent.connect(self.media_event)
         view.loadStarted.connect(self.stop)  # navegar o recargar reinicia el estado de la página
+        # WA_AlwaysStackOnTop pinta el video encima de toda la ventana, también de los
+        # paneles de Minichrome (extensiones, Slack, descargas…): se vigilan para recortarlos.
+        self._overlay_key = None
+        self._overlay_timer = QTimer(self)
+        self._overlay_timer.setInterval(150)
+        self._overlay_timer.timeout.connect(self._check_overlays)
         self.hide()
 
     # ─── API usada por el bridge ─────────────────────────────────────────────
@@ -126,6 +132,7 @@ class NativeVideoPlayer(QQuickWidget):
     def stop(self):
         QMetaObject.invokeMethod(self._root, "stopPlayback")
         self._layout = None
+        self._overlay_timer.stop()
         self.hide()
 
     def set_layout(self, data):
@@ -138,11 +145,43 @@ class NativeVideoPlayer(QQuickWidget):
         self._apply()
 
     # ─── Internos ────────────────────────────────────────────────────────────
+    def _qt_overlays(self, rect):
+        """Rects (relativos a `rect`, en coordenadas del WebView) de los widgets de
+        Qt apilados por encima del WebView: los hermanos posteriores de cada ancestro."""
+        out = []
+        child = self._view
+        parent = child.parentWidget()
+        while parent is not None:
+            siblings = [w for w in parent.children() if hasattr(w, "isVisible")]
+            if child in siblings:
+                for w in siblings[siblings.index(child) + 1:]:
+                    if not w.isVisible() or w.isWindow():
+                        continue
+                    r = QRect(self._view.mapFrom(parent, w.geometry().topLeft()), w.size()).intersected(rect)
+                    if not r.isEmpty():
+                        out.append(r.translated(-rect.x(), -rect.y()))
+            if parent.isWindow():
+                break
+            child, parent = parent, parent.parentWidget()
+        return out
+
+    def _check_overlays(self):
+        d = self._layout
+        if not d:
+            return
+        z = self._view.zoomFactor() or 1.0
+        rect = QRect(round(d["x"] * z), round(d["y"] * z), round(d["w"] * z), round(d["h"] * z))
+        key = [r.getRect() for r in self._qt_overlays(rect)]
+        if key != self._overlay_key:
+            self._apply()
+
     def _apply(self):
         d = self._layout
         if not d or not d.get("visible") or not self._root.property("active"):
+            self._overlay_timer.stop()
             self.hide()
             return
+        self._overlay_timer.start()
         z = self._view.zoomFactor() or 1.0
         px = lambda v: round(float(v) * z)
         x, y = px(d["x"]), px(d["y"])
@@ -150,8 +189,15 @@ class NativeVideoPlayer(QQuickWidget):
         if rect.isEmpty():
             self.hide()
             return
+        overlays = self._qt_overlays(rect)
+        self._overlay_key = [r.getRect() for r in overlays]
+        area = rect.width() * rect.height()
+        if any(r.width() * r.height() > area * 0.5 for r in overlays):  # un panel tapa el video
+            self.hide()
+            return
         self.setGeometry(rect)
         holes = [[px(hx) - x, px(hy) - y, px(hw), px(hh)] for hx, hy, hw, hh in d.get("holes") or []]
+        holes += [list(r.getRect()) for r in overlays]
         self._root.setProperty("holes", holes)  # recorte visual (QML)
         # La máscara de QWidget no afecta al pintado de un QQuickWidget, pero sí a los clics:
         # en los huecos el ratón llega a la página.

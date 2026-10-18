@@ -49,6 +49,7 @@ Item {
         else if (cmd === "toggle") togglePlay()
         else if (cmd === "stop") stopPlayback()
         else if (cmd === "focus") root.forceActiveFocus()
+        else if (cmd.startsWith("seek:")) seekTo(parseFloat(cmd.slice(5)) * 1000)
     }
 
     function togglePlay() {

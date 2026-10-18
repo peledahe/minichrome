@@ -7,12 +7,12 @@ import time
 import browser_features as bf
 from urllib.parse import urlparse
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QSizePolicy, QDialog
+    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QSizePolicy, QDialog, QFileDialog
 )
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWebEngineCore import (
     QWebEngineProfile, QWebEnginePage, QWebEngineScript, QWebEngineSettings,
-    QWebEngineUrlRequestInterceptor
+    QWebEngineUrlRequestInterceptor, QWebEngineFileSystemAccessRequest
 )
 from PyQt6.QtWebChannel import QWebChannel
 from PyQt6.QtCore import QUrl, Qt, QObject, QStandardPaths, QTimer, pyqtSignal
@@ -21,7 +21,7 @@ from config import (CACHE, DB, SPELL_LANG, is_internal_url, load_quick_links, sa
 from secure_store import encrypt, decrypt
 from db import _db, get_config, save_history
 from widgets import BTN_NAV, Notif
-from bridges import AgendaBridge, PasswordBridge
+from bridges import AgendaBridge, ExtensionMediaBridge, PasswordBridge, remember_granted_dir
 import slack_sync
 
 # ─── Perfil persistente ───────────────────────────────────────────────────────
@@ -546,6 +546,9 @@ def profile():
 
 
 # ─── WebPage personalizada (intercepta mensajes de consola) ───────────────────
+_FRAME_BLOCKED_RE = re.compile(r"Refused to (?:display|frame) '([^']+)'")
+
+
 class WebPage(QWebEnginePage):
     def __init__(self, profile, parent=None):
         super().__init__(profile, parent)
@@ -555,13 +558,38 @@ class WebPage(QWebEnginePage):
         self._last_autofill_ts = 0.0
         self._bridges: dict[str, QObject] = {}
         self._bridges_published = False
+        self._ext_bridges: dict[str, QObject] = {}
+        self._ext_bridges_published = False
         self.urlChanged.connect(self._sync_bridges)
         self.loadFinished.connect(lambda _ok: self._sync_bridges(self.url()))
+        self.fileSystemAccessRequested.connect(self._handle_file_system_access)
 
-    # ── Bridges py/pw solo para páginas internas ──────────────────────────────
-    def set_internal_bridges(self, channel, bridges: dict):
-        """El canal queda fijo; los objetos solo se publican en páginas internas."""
+    def chooseFiles(self, mode, old_files, accepted_mime_types):
+        """showDirectoryPicker() y <input webkitdirectory> piden una carpeta: el
+        diálogo por defecto de Qt no permitía elegirla en los visores, se usa el de carpetas."""
+        if mode == QWebEnginePage.FileSelectionMode.FileSelectUploadFolder:
+            start = old_files[0] if old_files else QStandardPaths.writableLocation(
+                QStandardPaths.StandardLocation.HomeLocation)
+            parent = self.parent() if isinstance(self.parent(), QWidget) else None
+            path = QFileDialog.getExistingDirectory(parent, "Seleccionar carpeta", start)
+            return [path] if path else []
+        return super().chooseFiles(mode, old_files, accepted_mime_types)
+
+    def _handle_file_system_access(self, request):
+        """Concede acceso al sistema de archivos solicitado por la página o extensión."""
+        request.accept()
+        # Las carpetas concedidas a extensiones permiten luego reproducir sus
+        # videos H.264 con el reproductor nativo (ExtensionMediaBridge).
+        if request.handleType() == QWebEngineFileSystemAccessRequest.HandleType.Directory:
+            origin = request.origin()
+            remember_granted_dir(f"{origin.scheme()}://{origin.host()}", request.filePath().toLocalFile())
+
+    # ── Bridges py/pw solo para páginas internas; mcmedia solo para extensiones ──
+    def set_internal_bridges(self, channel, bridges: dict, extension_bridges: dict | None = None):
+        """El canal queda fijo; los objetos solo se publican en páginas internas
+        (bridges) o en páginas chrome-extension:// (extension_bridges)."""
         self._bridges = bridges
+        self._ext_bridges = extension_bridges or {}
         self.setWebChannel(channel)
         self._sync_bridges(self.url())
 
@@ -569,15 +597,23 @@ class WebPage(QWebEnginePage):
         channel = self.webChannel()
         if channel is None:
             return
-        internal = is_internal_url(url)
-        if not internal and self._bridges_published:
-            for obj in self._bridges.values():
+        self._bridges_published = self._publish(
+            channel, self._bridges, self._bridges_published, is_internal_url(url), allow_register)
+        self._ext_bridges_published = self._publish(
+            channel, self._ext_bridges, self._ext_bridges_published,
+            url.scheme() == "chrome-extension", allow_register)
+
+    @staticmethod
+    def _publish(channel, objects, published, wanted, allow_register):
+        if published and not wanted:
+            for obj in objects.values():
                 channel.deregisterObject(obj)
-            self._bridges_published = False
-        elif internal and allow_register and not self._bridges_published:
-            for name, obj in self._bridges.items():
+            return False
+        if wanted and allow_register and not published:
+            for name, obj in objects.items():
                 channel.registerObject(name, obj)
-            self._bridges_published = True
+            return True
+        return published
 
     def _sync_remote_access(self, url):
         """Solo las páginas propias (ui/) pueden cargar recursos remotos, como
@@ -893,6 +929,14 @@ class WebPage(QWebEnginePage):
         elif message.startswith("MINICHROME_ENGINES:"):
             if is_internal_url(page_url):
                 save_search_engines(message[len("MINICHROME_ENGINES:"):])
+        elif page_url.scheme() == "chrome-extension":
+            # En Chrome la extensión quita X-Frame-Options/frame-ancestors con
+            # declarativeNetRequest; QtWebEngine no puede, así que el shim
+            # sustituye el iframe rechazado por un acceso para abrirlo en pestaña.
+            m = _FRAME_BLOCKED_RE.match(message)
+            if m:
+                self.runJavaScript("window.__minichromeFrameBlocked && "
+                                   f"window.__minichromeFrameBlocked({json.dumps(m.group(1))})")
         elif message.startswith("MINICHROME_AUTOFILL_REQUEST:"):
             try:
                 if page_url.scheme() not in ("http", "https"):
@@ -1012,7 +1056,9 @@ class WebView(QWebEngineView):
         self._channel = QWebChannel(self)
         self._bridge = AgendaBridge(self)
         self._pw_bridge = PasswordBridge(self)
-        page.set_internal_bridges(self._channel, {"py": self._bridge, "pw": self._pw_bridge})
+        self._media_bridge = ExtensionMediaBridge(self)
+        page.set_internal_bridges(self._channel, {"py": self._bridge, "pw": self._pw_bridge},
+                                  {"mcmedia": self._media_bridge})
 
         page.windowCloseRequested.connect(self.closeRequested)
         page.geometryChangeRequested.connect(self._ignore_geom)
@@ -1079,8 +1125,9 @@ class WebView(QWebEngineView):
             Notif(title, body, self.main_win)
 
     def _on_permission(self, permission):
-        # Las páginas internas conservan el comportamiento previo (sin diálogo).
-        if is_internal_url(self.url()):
+        # Las páginas internas y extensiones chrome-extension:// conservan permisos concedidos
+        if is_internal_url(self.url()) or self.url().scheme() == "chrome-extension":
+            permission.grant()
             return
         decision = self.permission_policy(permission) if self.permission_policy else None
         if decision is True:
